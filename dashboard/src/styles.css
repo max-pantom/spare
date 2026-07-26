@@ -1,0 +1,467 @@
+:root {
+  color: oklch(0.23 0.018 150);
+  background: oklch(0.965 0.008 92);
+  font-family:
+    Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --ink: oklch(0.23 0.018 150);
+  --muted: oklch(0.47 0.018 150);
+  --surface: oklch(0.995 0.003 92);
+  --primary: oklch(0.35 0.075 155);
+  --primary-hover: oklch(0.3 0.075 155);
+  --success: oklch(0.42 0.1 150);
+  --warning: oklch(0.5 0.12 70);
+  --danger: oklch(0.45 0.16 28);
+  --focus: oklch(0.52 0.16 255);
+  --shadow:
+    0 0 0 1px oklch(0 0 0 / 0.06),
+    0 1px 2px -1px oklch(0 0 0 / 0.06),
+    0 12px 36px -20px oklch(0 0 0 / 0.18);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 20rem;
+}
+
+body {
+  min-width: 20rem;
+  min-height: 100vh;
+  margin: 0;
+  background:
+    radial-gradient(circle at 80% 0%, oklch(0.92 0.035 145 / 0.55), transparent 32rem),
+    oklch(0.965 0.008 92);
+}
+
+button,
+a {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+a {
+  color: var(--primary);
+  text-underline-offset: 0.18em;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+
+.skip-link {
+  position: absolute;
+  inset-block-start: 1rem;
+  inset-inline-start: -999rem;
+  z-index: 10;
+  min-height: 2.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  background: var(--ink);
+  color: white;
+}
+
+.skip-link:focus {
+  inset-inline-start: 1rem;
+}
+
+.masthead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: min(100% - 2rem, 70rem);
+  margin-inline: auto;
+  padding-block: 1.5rem;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.brand-mark {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 0.65rem;
+  background: var(--ink);
+  color: white;
+  font-size: 0.82rem;
+}
+
+.machine-name {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+  text-align: end;
+}
+
+.shell {
+  width: min(100% - 2rem, 70rem);
+  margin-inline: auto;
+  padding-block: clamp(2.5rem, 8vw, 6rem);
+  padding-block-end: calc(4rem + env(safe-area-inset-bottom));
+}
+
+.hero {
+  max-width: 47rem;
+}
+
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0 0 1rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.status-healthy {
+  color: var(--success);
+}
+
+.status-degraded,
+.status-starting {
+  color: var(--warning);
+}
+
+.status-failed {
+  color: var(--danger);
+}
+
+.status-dot {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 0.62rem;
+  height: 0.62rem;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 0.24rem oklch(0.47 0.018 150 / 0.1);
+}
+
+.status-dot-ready,
+.status-dot-healthy {
+  color: var(--success);
+}
+
+.status-dot-degraded,
+.status-dot-starting {
+  color: var(--warning);
+}
+
+.status-dot-failed {
+  color: var(--danger);
+}
+
+h1,
+h2,
+p {
+  overflow-wrap: anywhere;
+}
+
+h1 {
+  max-width: 16ch;
+  margin: 0;
+  font-size: clamp(2.5rem, 7vw, 5.75rem);
+  font-weight: 650;
+  letter-spacing: -0.065em;
+  line-height: 0.98;
+}
+
+.lede {
+  max-width: 42rem;
+  margin: 1.5rem 0 0;
+  color: var(--muted);
+  font-size: clamp(1.05rem, 2vw, 1.32rem);
+  line-height: 1.55;
+}
+
+.recovery {
+  max-width: 42rem;
+  margin-block: 0.75rem 0;
+  color: var(--ink);
+  line-height: 1.55;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-block-start: 2rem;
+}
+
+.button {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 0.8rem;
+  padding-inline: 1.1rem;
+  font: inherit;
+  font-weight: 650;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.button-primary {
+  background: var(--primary);
+  color: white;
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.16);
+}
+
+.button-secondary {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .button {
+    transition-property: background-color, box-shadow, scale;
+    transition-duration: 130ms;
+    transition-timing-function: ease-out;
+  }
+
+  .button:not(:disabled):active {
+    scale: 0.96;
+  }
+
+  .button-primary:hover {
+    background: var(--primary-hover);
+  }
+}
+
+.content-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(16rem, 0.75fr);
+  gap: 1rem;
+  margin-block-start: clamp(3.5rem, 8vw, 6rem);
+}
+
+.card,
+.details-card,
+.error-panel {
+  border-radius: 1.35rem;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 2rem;
+  padding: clamp(1.25rem, 4vw, 2rem);
+}
+
+.command-card {
+  max-width: 47rem;
+  margin-block-start: clamp(3.5rem, 8vw, 6rem);
+}
+
+.card-kicker {
+  margin: 0 0 0.55rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.card h2 {
+  margin: 0;
+  font-size: 1.35rem;
+  letter-spacing: -0.025em;
+}
+
+.card p {
+  margin: 0.65rem 0 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.command {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: 0.8rem;
+  padding: 1rem;
+  background: oklch(0.23 0.018 150);
+  color: oklch(0.96 0.01 145);
+  font-size: 0.92rem;
+  white-space: nowrap;
+}
+
+.address-list {
+  display: grid;
+  gap: 1.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.address-list li {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.address-list span {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.address-list a,
+.qr-address {
+  max-width: 100%;
+  font-size: 0.92rem;
+  overflow-wrap: anywhere;
+}
+
+.qr-card {
+  align-items: center;
+  text-align: center;
+}
+
+.qr {
+  width: min(12rem, 100%);
+  height: auto;
+  border-radius: 0.75rem;
+  outline: 1px solid oklch(0 0 0 / 0.1);
+  outline-offset: -1px;
+}
+
+.details-card {
+  max-width: 47rem;
+  margin-block-start: 1rem;
+  padding: 0.35rem 1.2rem;
+}
+
+.details-card summary {
+  min-height: 2.75rem;
+  padding-block: 0.85rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.details-card dl {
+  display: grid;
+  gap: 1rem;
+  margin: 0;
+  padding-block: 0.5rem 1.25rem;
+}
+
+.details-card dl > div {
+  display: grid;
+  grid-template-columns: minmax(7rem, 0.35fr) minmax(0, 1fr);
+  gap: 1rem;
+}
+
+.details-card dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.details-card dd {
+  min-width: 0;
+  margin: 0;
+}
+
+.path {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.error-panel {
+  max-width: 47rem;
+  margin-block-end: 2rem;
+  padding: 1.1rem 1.25rem;
+  box-shadow:
+    0 0 0 1px oklch(0.45 0.16 28 / 0.22),
+    0 8px 24px -18px oklch(0.45 0.16 28 / 0.3);
+}
+
+.error-panel strong {
+  color: var(--danger);
+}
+
+.error-panel p {
+  margin: 0.45rem 0 0;
+  line-height: 1.5;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 45rem) {
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .masthead {
+    align-items: flex-start;
+  }
+
+  .details-card dl > div {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+}
+
+@media (max-width: 25rem) {
+  .masthead,
+  .shell {
+    width: min(100% - 2rem, 70rem);
+  }
+
+  .actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (forced-colors: active) {
+  .button,
+  .card,
+  .details-card,
+  .error-panel {
+    border: 1px solid CanvasText;
+  }
+
+  .status-dot {
+    forced-color-adjust: auto;
+  }
+}
+
