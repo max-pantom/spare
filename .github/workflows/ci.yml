@@ -46,24 +46,3 @@ jobs:
         run: npx playwright install --with-deps --no-shell chromium
       - working-directory: dashboard
         run: npm run test:e2e
-
-  release-artifacts:
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: 1.25.12
-          cache: true
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: dashboard/package-lock.json
-      - working-directory: dashboard
-        run: npm ci
-      - run: make release
-      - uses: actions/upload-artifact@v4
-        with:
-          name: spare-engineering-preview
-          path: dist/releases/*
