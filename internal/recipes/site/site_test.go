@@ -108,3 +108,27 @@ func TestHandlerRejectsWrites(t *testing.T) {
 		t.Fatalf("expected 405, got %d", response.Code)
 	}
 }
+
+func TestSiteHealthDegradesAndRecoversWithRootFolder(t *testing.T) {
+	root := t.TempDir()
+	if snapshot := siteHealth(root); snapshot.Status != "healthy" {
+		t.Fatalf("healthy snapshot = %#v", snapshot)
+	}
+
+	moved := root + "-moved"
+	if err := os.Rename(root, moved); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := siteHealth(root)
+	if snapshot.Status != "degraded" ||
+		snapshot.ProblemCode != "selected_folder_unavailable" {
+		t.Fatalf("missing-folder snapshot = %#v", snapshot)
+	}
+
+	if err := os.Rename(moved, root); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot := siteHealth(root); snapshot.Status != "healthy" {
+		t.Fatalf("recovered snapshot = %#v", snapshot)
+	}
+}

@@ -892,6 +892,42 @@ func (m *Manager) applyHealthSnapshotLocked(current *worker, snapshot health.Sna
 	current.healthFails = 0
 	current.instance.StorageAvailableBytes = snapshot.StorageAvailableBytes
 	current.instance.ItemCount = snapshot.ItemCount
+	snapshotStatus := snapshot.Status
+	if snapshotStatus == "" {
+		snapshotStatus = model.StatusHealthy
+	}
+	if snapshotStatus != model.StatusHealthy {
+		code := snapshot.ProblemCode
+		if code == "" {
+			code = "worker_reported_degraded"
+		}
+		summary := snapshot.ProblemSummary
+		if summary == "" {
+			summary = m.title(current.instance.RecipeID) + " needs attention."
+		}
+		recovery := snapshot.ProblemRecovery
+		if recovery == "" {
+			recovery = "Run `spare doctor` for more information."
+		}
+		changed := current.instance.Status != model.StatusDegraded ||
+			current.instance.Problem == nil ||
+			current.instance.Problem.Code != code ||
+			current.instance.Problem.Summary != summary ||
+			current.instance.Problem.Recovery != recovery
+		current.instance.Status = model.StatusDegraded
+		current.instance.Problem = &model.Problem{
+			Code:     code,
+			Severity: "warning",
+			Summary:  summary,
+			Recovery: recovery,
+		}
+		if changed {
+			current.instance.UpdatedAt = time.Now().UTC()
+			m.persistLocked(current)
+			m.eventLocked(current, "warning", "instance_degraded", summary, map[string]any{"code": code})
+		}
+		return
+	}
 	if current.healthyBefore && current.instance.RecipeID == model.RecipeDrop &&
 		snapshot.ItemCount > previousItemCount {
 		count := snapshot.ItemCount - previousItemCount
@@ -922,8 +958,9 @@ func (m *Manager) applyHealthSnapshotLocked(current *worker, snapshot health.Sna
 			"request": snapshot.LatestItem,
 		})
 	}
-	if !current.healthyBefore {
+	if !current.healthyBefore || current.instance.Status != model.StatusHealthy || current.instance.Problem != nil {
 		now := time.Now().UTC()
+		recovered := current.healthyBefore
 		current.healthyBefore = true
 		current.instance.Status = model.StatusHealthy
 		current.instance.Problem = nil
@@ -933,7 +970,13 @@ func (m *Manager) applyHealthSnapshotLocked(current *worker, snapshot health.Sna
 		if current.mdns == nil {
 			current.mdns, _ = discovery.Advertise(m.machine.Hostname, current.instance.Port)
 		}
-		m.eventLocked(current, "info", "instance_healthy", m.title(current.instance.RecipeID)+" is ready.", nil)
+		kind := "instance_healthy"
+		message := m.title(current.instance.RecipeID) + " is ready."
+		if recovered {
+			kind = "instance_recovered"
+			message = m.title(current.instance.RecipeID) + " recovered."
+		}
+		m.eventLocked(current, "info", kind, message, nil)
 	}
 }
 

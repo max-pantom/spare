@@ -333,6 +333,70 @@ func TestHookHealthChangeCreatesCapturedRequestActivity(t *testing.T) {
 	}
 }
 
+func TestReportedDegradationUpdatesStatusAndRecovers(t *testing.T) {
+	store, err := state.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	registry, err := recipes.Builtins()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := New(
+		store,
+		t.TempDir(),
+		model.Machine{ID: "spare_test", Hostname: "test"},
+		registry,
+		map[string]spareRuntime.Runtime{"native": &native.Driver{Executable: "unused"}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Shutdown()
+
+	current := &worker{
+		instance: model.Instance{
+			ID:       model.RecipeSite,
+			RecipeID: model.RecipeSite,
+			Mode:     model.ModeTemporary,
+			Status:   model.StatusHealthy,
+		},
+		healthyBefore: true,
+	}
+	manager.mu.Lock()
+	manager.applyHealthSnapshotLocked(current, health.Snapshot{
+		Status:          model.StatusDegraded,
+		ProblemCode:     "selected_folder_unavailable",
+		ProblemSummary:  "The selected folder is unavailable.",
+		ProblemRecovery: "Restore the folder.",
+	})
+	manager.mu.Unlock()
+
+	if current.instance.Status != model.StatusDegraded ||
+		current.instance.Problem == nil ||
+		current.instance.Problem.Code != "selected_folder_unavailable" {
+		t.Fatalf("degraded instance = %#v", current.instance)
+	}
+
+	manager.mu.Lock()
+	manager.applyHealthSnapshotLocked(current, health.Snapshot{Status: model.StatusHealthy})
+	manager.mu.Unlock()
+	if current.instance.Status != model.StatusHealthy || current.instance.Problem != nil {
+		t.Fatalf("recovered instance = %#v", current.instance)
+	}
+
+	events, err := store.Events(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 ||
+		events[0].Kind != "instance_recovered" ||
+		events[1].Kind != "instance_degraded" {
+		t.Fatalf("health transition events = %#v", events)
+	}
+}
+
 func TestCopyDropFileKeepsDuplicateNamesAndContent(t *testing.T) {
 	root := t.TempDir()
 	sourceDirectory := t.TempDir()

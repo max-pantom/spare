@@ -203,7 +203,7 @@ func (i *Implementation) Serve(values map[string]any, port, healthPort int) erro
 		return err
 	}
 	healthServer, err := health.Start(healthPort, func() health.Snapshot {
-		return health.Snapshot{Status: "healthy"}
+		return siteHealth(root)
 	})
 	if err != nil {
 		return err
@@ -216,4 +216,17 @@ func (i *Implementation) Serve(values map[string]any, port, healthPort int) erro
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return server.ListenAndServe()
+}
+
+func siteHealth(root string) health.Snapshot {
+	info, err := os.Stat(root)
+	if err != nil || !info.IsDir() {
+		return health.Snapshot{
+			Status:          "degraded",
+			ProblemCode:     "selected_folder_unavailable",
+			ProblemSummary:  "The selected folder is unavailable.",
+			ProblemRecovery: "Reconnect or restore the folder. Site will recover automatically.",
+		}
+	}
+	return health.Snapshot{Status: "healthy"}
 }

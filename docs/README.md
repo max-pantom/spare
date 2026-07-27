@@ -5,6 +5,7 @@ These guides describe **Spare 0.1 Preview**, machine-readable version `0.1.0`.
 ## Start here
 
 - [Install Spare](INSTALLATION.md)
+- [Choose versions and release tags](VERSIONING.md)
 - [Use Spare Desktop](DESKTOP.md)
 - [Test Spare](TESTING.md)
 - [Use the built-in recipes](BUILT-IN-RECIPES.md)

@@ -14,6 +14,9 @@ type Snapshot struct {
 	StorageAvailableBytes uint64 `json:"storageAvailableBytes,omitempty"`
 	ItemCount             int    `json:"itemCount,omitempty"`
 	LatestItem            string `json:"latestItem,omitempty"`
+	ProblemCode           string `json:"problemCode,omitempty"`
+	ProblemSummary        string `json:"problemSummary,omitempty"`
+	ProblemRecovery       string `json:"problemRecovery,omitempty"`
 }
 
 type Provider func() Snapshot
@@ -74,7 +77,7 @@ func (c Checker) Check(ctx context.Context, port int) (Snapshot, error) {
 	if err := json.NewDecoder(response.Body).Decode(&snapshot); err != nil {
 		return Snapshot{}, err
 	}
-	if snapshot.Status != "healthy" {
+	if snapshot.Status != "healthy" && snapshot.Status != "degraded" {
 		return snapshot, fmt.Errorf("worker reported %s", snapshot.Status)
 	}
 	return snapshot, nil
