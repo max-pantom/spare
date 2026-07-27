@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"strconv"
@@ -26,13 +27,11 @@ type Server struct {
 }
 
 type createInstanceRequest struct {
-	RecipeID string `json:"recipeId"`
-	Mode     string `json:"mode"`
-	Config   struct {
-		RootPath string `json:"rootPath"`
-		Port     int    `json:"port"`
-		PortMode string `json:"portMode"`
-	} `json:"config"`
+	RecipeID string         `json:"recipeId"`
+	Mode     string         `json:"mode"`
+	Config   map[string]any `json:"config"`
+	Port     int            `json:"port"`
+	PortMode string         `json:"portMode"`
 }
 
 func NewServer(token string, store *state.Store, manager *supervisor.Manager, assets fs.FS) *Server {
@@ -132,7 +131,7 @@ func (s *Server) serveAPI(response http.ResponseWriter, request *http.Request) {
 		}
 		writeJSON(response, http.StatusOK, machine)
 	case path == "/recipes" && request.Method == http.MethodGet:
-		writeJSON(response, http.StatusOK, []model.Recipe{model.SiteRecipe()})
+		writeJSON(response, http.StatusOK, s.manager.Recipes())
 	case path == "/instances" && request.Method == http.MethodGet:
 		writeJSON(response, http.StatusOK, s.manager.List())
 	case path == "/instances" && request.Method == http.MethodPost:
@@ -161,18 +160,19 @@ func (s *Server) createInstance(response http.ResponseWriter, request *http.Requ
 	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 64*1024))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&input); err != nil {
-		writeAPIError(response, http.StatusBadRequest, "invalid_request", "The Site configuration is invalid.", err.Error())
+		writeAPIError(response, http.StatusBadRequest, "invalid_request", "The recipe configuration is invalid.", err.Error())
 		return
 	}
-	if input.RecipeID != model.RecipeSite {
-		writeAPIError(response, http.StatusBadRequest, "unknown_recipe", "Only the built-in Site recipe is available.", "")
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeAPIError(response, http.StatusBadRequest, "invalid_request", "The recipe configuration is invalid.", "Send exactly one JSON object.")
 		return
 	}
 	instance, err := s.manager.Create(supervisor.CreateRequest{
+		RecipeID: input.RecipeID,
 		Mode:     input.Mode,
-		RootPath: input.Config.RootPath,
-		Port:     input.Config.Port,
-		PortMode: input.Config.PortMode,
+		Config:   input.Config,
+		Port:     input.Port,
+		PortMode: input.PortMode,
 	})
 	if err != nil {
 		writeManagerError(response, err)
@@ -184,7 +184,7 @@ func (s *Server) createInstance(response http.ResponseWriter, request *http.Requ
 func (s *Server) instanceAction(response http.ResponseWriter, request *http.Request, route string) {
 	parts := strings.Split(strings.Trim(route, "/"), "/")
 	if len(parts) == 0 || parts[0] == "" {
-		writeAPIError(response, http.StatusNotFound, "instance_not_found", "Site is not installed.", "")
+		writeAPIError(response, http.StatusNotFound, "instance_not_found", "The requested recipe is not installed.", "Run `spare status` to list installed recipes.")
 		return
 	}
 	id := parts[0]

@@ -10,6 +10,13 @@ RELEASE_VERSION=${VERSION:-0.1.0}
 mkdir -p "$RELEASE_DIR"
 find "$RELEASE_DIR" -mindepth 1 -maxdepth 1 -type f -delete
 
+go run "$PROJECT_ROOT/cmd/spare" recipe pack "$PROJECT_ROOT/recipes/site" \
+  --output "$RELEASE_DIR/site_${RELEASE_VERSION}.sp"
+go run "$PROJECT_ROOT/cmd/spare" recipe pack "$PROJECT_ROOT/recipes/drop" \
+  --output "$RELEASE_DIR/drop_${RELEASE_VERSION}.sp"
+go run "$PROJECT_ROOT/cmd/spare" recipe pack "$PROJECT_ROOT/recipes/hook" \
+  --output "$RELEASE_DIR/hook_${RELEASE_VERSION}.sp"
+
 for target in \
   darwin/amd64 \
   darwin/arm64 \
@@ -30,8 +37,12 @@ do
   CGO_ENABLED=0 GOOS="$target_os" GOARCH="$target_arch" \
     go build -trimpath -ldflags="-s -w -X main.version=$RELEASE_VERSION" \
     -o "$package_dir/spare$binary_suffix" "$PROJECT_ROOT/cmd/spare"
+  daemon_ldflags="-s -w -X main.version=$RELEASE_VERSION"
+  if [ "$target_os" = "windows" ]; then
+    daemon_ldflags="$daemon_ldflags -H=windowsgui"
+  fi
   CGO_ENABLED=0 GOOS="$target_os" GOARCH="$target_arch" \
-    go build -trimpath -ldflags="-s -w -X main.version=$RELEASE_VERSION" \
+    go build -trimpath -ldflags="$daemon_ldflags" \
     -o "$package_dir/spared$binary_suffix" "$PROJECT_ROOT/cmd/spared"
 
   cp "$PROJECT_ROOT/README.md" "$package_dir/README.md"
@@ -54,9 +65,9 @@ done
 (
   cd "$RELEASE_DIR"
   if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum ./*.tar.gz ./*.zip > checksums.txt
+    sha256sum ./*.sp ./*.tar.gz ./*.zip > checksums.txt
   else
-    shasum -a 256 ./*.tar.gz ./*.zip > checksums.txt
+    shasum -a 256 ./*.sp ./*.tar.gz ./*.zip > checksums.txt
   fi
 )
 

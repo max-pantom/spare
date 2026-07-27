@@ -4,6 +4,8 @@ import "time"
 
 const (
 	RecipeSite = "site"
+	RecipeDrop = "drop"
+	RecipeHook = "hook"
 
 	ModeTemporary = "temporary"
 	ModeInstalled = "installed"
@@ -20,16 +22,26 @@ const (
 )
 
 type Machine struct {
-	ID                    string    `json:"id"`
-	Hostname              string    `json:"hostname"`
-	OS                    string    `json:"os"`
-	Architecture          string    `json:"architecture"`
-	LogicalCores          int       `json:"logicalCores"`
-	MemoryTotalBytes      uint64    `json:"memoryTotalBytes"`
-	StorageAvailableBytes uint64    `json:"storageAvailableBytes"`
-	LANAddresses          []string  `json:"lanAddresses"`
-	InitializedAt         time.Time `json:"initializedAt"`
-	LastProfiledAt        time.Time `json:"lastProfiledAt"`
+	ID                    string       `json:"id"`
+	Hostname              string       `json:"hostname"`
+	OS                    string       `json:"os"`
+	Architecture          string       `json:"architecture"`
+	LogicalCores          int          `json:"logicalCores"`
+	MemoryTotalBytes      uint64       `json:"memoryTotalBytes"`
+	StorageAvailableBytes uint64       `json:"storageAvailableBytes"`
+	LANAddresses          []string     `json:"lanAddresses"`
+	Capabilities          Capabilities `json:"capabilities"`
+	InitializedAt         time.Time    `json:"initializedAt"`
+	LastProfiledAt        time.Time    `json:"lastProfiledAt"`
+}
+
+type Capabilities struct {
+	CanServeLAN        bool `json:"canServeLAN"`
+	CanRunPersistent   bool `json:"canRunPersistent"`
+	CanStoreLargeFiles bool `json:"canStoreLargeFiles"`
+	CanRunContainers   bool `json:"canRunContainers"`
+	HasBattery         bool `json:"hasBattery"`
+	HasExternalStorage bool `json:"hasExternalStorage"`
 }
 
 type ResourceGuidance struct {
@@ -38,13 +50,39 @@ type ResourceGuidance struct {
 	CPUMaximum             int    `json:"cpuMaximum"`
 }
 
+type Compatibility struct {
+	Supported bool     `json:"supported"`
+	Rating    string   `json:"rating"`
+	Reasons   []string `json:"reasons"`
+	Warnings  []string `json:"warnings"`
+}
+
+type ConfigField struct {
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+	Required    bool   `json:"required"`
+	Default     any    `json:"default,omitempty"`
+}
+
+type PermissionGrant struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+	Granted     bool   `json:"granted"`
+}
+
 type Recipe struct {
-	ID               string           `json:"id"`
-	Title            string           `json:"title"`
-	Description      string           `json:"description"`
-	Runtime          string           `json:"runtime"`
-	SupportedSystems []string         `json:"supportedSystems"`
-	Resources        ResourceGuidance `json:"resources"`
+	ID               string            `json:"id"`
+	Title            string            `json:"title"`
+	Version          string            `json:"version"`
+	Description      string            `json:"description"`
+	Runtime          string            `json:"runtime"`
+	SupportedSystems []string          `json:"supportedSystems"`
+	Resources        ResourceGuidance  `json:"resources"`
+	Config           []ConfigField     `json:"config"`
+	Permissions      []PermissionGrant `json:"permissions"`
+	Compatibility    Compatibility     `json:"compatibility"`
 }
 
 type Problem struct {
@@ -55,19 +93,25 @@ type Problem struct {
 }
 
 type Instance struct {
-	ID           string     `json:"id"`
-	RecipeID     string     `json:"recipeId"`
-	Mode         string     `json:"mode"`
-	DesiredState string     `json:"desiredState"`
-	Status       string     `json:"status"`
-	RootPath     string     `json:"rootPath"`
-	Port         int        `json:"port"`
-	PortMode     string     `json:"portMode"`
-	URLs         []string   `json:"urls"`
-	StartedAt    *time.Time `json:"startedAt,omitempty"`
-	CreatedAt    time.Time  `json:"createdAt"`
-	UpdatedAt    time.Time  `json:"updatedAt"`
-	Problem      *Problem   `json:"problem,omitempty"`
+	ID                    string         `json:"id"`
+	RecipeID              string         `json:"recipeId"`
+	Version               string         `json:"version"`
+	Runtime               string         `json:"runtime"`
+	Mode                  string         `json:"mode"`
+	DesiredState          string         `json:"desiredState"`
+	Status                string         `json:"status"`
+	RootPath              string         `json:"rootPath"`
+	DataPath              string         `json:"dataPath"`
+	Config                map[string]any `json:"config"`
+	Port                  int            `json:"port"`
+	PortMode              string         `json:"portMode"`
+	URLs                  []string       `json:"urls"`
+	StorageAvailableBytes uint64         `json:"storageAvailableBytes"`
+	ItemCount             int            `json:"itemCount"`
+	StartedAt             *time.Time     `json:"startedAt,omitempty"`
+	CreatedAt             time.Time      `json:"createdAt"`
+	UpdatedAt             time.Time      `json:"updatedAt"`
+	Problem               *Problem       `json:"problem,omitempty"`
 }
 
 type Event struct {
@@ -88,23 +132,4 @@ type APIError struct {
 
 type ErrorEnvelope struct {
 	Error APIError `json:"error"`
-}
-
-func SiteRecipe() Recipe {
-	return Recipe{
-		ID:          RecipeSite,
-		Title:       "Site",
-		Description: "Serve a folder as a read-only website on this computer and the local network.",
-		Runtime:     "native",
-		SupportedSystems: []string{
-			"darwin",
-			"windows",
-			"linux",
-		},
-		Resources: ResourceGuidance{
-			MemoryRecommendedBytes: 64 * 1024 * 1024,
-			MemoryMaximumBytes:     256 * 1024 * 1024,
-			CPUMaximum:             1,
-		},
-	}
 }

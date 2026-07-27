@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -20,7 +22,9 @@ import (
 	"github.com/spare-run/spare/internal/model"
 	"github.com/spare-run/spare/internal/paths"
 	"github.com/spare-run/spare/internal/profile"
-	"github.com/spare-run/spare/internal/site"
+	"github.com/spare-run/spare/internal/recipes"
+	spareRuntime "github.com/spare-run/spare/internal/runtime"
+	"github.com/spare-run/spare/internal/runtime/native"
 	"github.com/spare-run/spare/internal/state"
 	"github.com/spare-run/spare/internal/supervisor"
 )
@@ -42,20 +46,38 @@ func main() {
 }
 
 func runWorker(args []string) error {
-	if len(args) == 0 || args[0] != "site" {
-		return errors.New("unknown Spare worker")
-	}
-	flags := flag.NewFlagSet("site-worker", flag.ContinueOnError)
-	root := flags.String("path", "", "site root")
-	port := flags.Int("port", 0, "site port")
+	flags := flag.NewFlagSet("recipe-worker", flag.ContinueOnError)
+	recipeID := flags.String("recipe", "", "recipe id")
+	configValue := flags.String("config", "", "base64url-encoded recipe configuration")
+	port := flags.Int("port", 0, "recipe port")
 	healthPort := flags.Int("health-port", 0, "health port")
-	if err := flags.Parse(args[1:]); err != nil {
+	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if *root == "" || *port == 0 || *healthPort == 0 {
-		return errors.New("the Site worker is missing required configuration")
+	if *recipeID == "" || *configValue == "" || *port == 0 || *healthPort == 0 {
+		return errors.New("the recipe worker is missing required configuration")
 	}
-	return site.Serve(*root, *port, *healthPort)
+	configJSON, err := base64.RawURLEncoding.DecodeString(*configValue)
+	if err != nil {
+		return errors.New("the recipe worker configuration is invalid")
+	}
+	var values map[string]any
+	if err := json.Unmarshal(configJSON, &values); err != nil {
+		return errors.New("the recipe worker configuration is invalid")
+	}
+	registry, err := recipes.Builtins()
+	if err != nil {
+		return err
+	}
+	implementation, ok := registry.Get(*recipeID)
+	if !ok {
+		return fmt.Errorf("recipe %q is not built into this Spare release", *recipeID)
+	}
+	resolved, err := implementation.ResolveConfig(values)
+	if err != nil {
+		return err
+	}
+	return implementation.Serve(resolved, *port, *healthPort)
 }
 
 func runDaemon() error {
@@ -92,7 +114,14 @@ func runDaemon() error {
 	if err != nil {
 		return err
 	}
-	manager, err := supervisor.New(store, statePaths.Logs, executable, machine)
+	registry, err := recipes.Builtins()
+	if err != nil {
+		return err
+	}
+	runtimes := map[string]spareRuntime.Runtime{
+		"native": &native.Driver{Executable: executable},
+	}
+	manager, err := supervisor.New(store, statePaths.Logs, machine, registry, runtimes)
 	if err != nil {
 		return err
 	}

@@ -74,21 +74,38 @@ func (c *Client) Machine(ctx context.Context) (model.Machine, error) {
 	return result, err
 }
 
+func (c *Client) Recipes(ctx context.Context) ([]model.Recipe, error) {
+	var result []model.Recipe
+	err := c.do(ctx, http.MethodGet, "/api/v1/recipes", nil, &result)
+	return result, err
+}
+
 func (c *Client) Instances(ctx context.Context) ([]model.Instance, error) {
 	var result []model.Instance
 	err := c.do(ctx, http.MethodGet, "/api/v1/instances", nil, &result)
 	return result, err
 }
 
-func (c *Client) Create(ctx context.Context, mode, rootPath, portMode string, port int) (model.Instance, error) {
+func (c *Client) Instance(ctx context.Context, id string) (model.Instance, error) {
+	var result model.Instance
+	err := c.do(ctx, http.MethodGet, "/api/v1/instances/"+id, nil, &result)
+	return result, err
+}
+
+func (c *Client) Create(
+	ctx context.Context,
+	recipeID,
+	mode string,
+	config map[string]any,
+	portMode string,
+	port int,
+) (model.Instance, error) {
 	body := map[string]any{
-		"recipeId": model.RecipeSite,
+		"recipeId": recipeID,
 		"mode":     mode,
-		"config": map[string]any{
-			"rootPath": rootPath,
-			"portMode": portMode,
-			"port":     port,
-		},
+		"config":   config,
+		"portMode": portMode,
+		"port":     port,
 	}
 	var result model.Instance
 	err := c.do(ctx, http.MethodPost, "/api/v1/instances", body, &result)

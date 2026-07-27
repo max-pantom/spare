@@ -1,0 +1,56 @@
+schema: spare.recipe/v1
+id: drop
+name: Drop
+version: 0.1.0
+description: Send files to this computer from a browser on the local network.
+support:
+  systems:
+    - darwin
+    - windows
+    - linux
+  architectures:
+    - amd64
+    - arm64
+runtime:
+  type: native
+resources:
+  memoryRecommendedBytes: 134217728
+  memoryMaximumBytes: 536870912
+  cpuMaximum: 1
+  storageMinimumBytes: 104857600
+network:
+  visibility: local
+  port: automatic
+storage:
+  pathField: destination
+  readOnly: false
+health:
+  type: http
+  path: /
+  intervalSeconds: 10
+  failureThreshold: 3
+config:
+  destination:
+    type: directory
+    label: Destination folder
+    description: Files received through Drop are written here.
+    required: true
+  max-file-size:
+    type: size
+    label: Maximum file size
+    description: Drop rejects individual files larger than this limit.
+    default: 2GB
+    minimum: 1024
+    maximum: 100000000000
+permissions:
+  filesystem:
+    read:
+      - destination
+    write:
+      - destination
+  network:
+    local: true
+    internet: false
+  startOnLogin: true
+  runInBackground: true
+

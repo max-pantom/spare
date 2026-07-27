@@ -2,12 +2,10 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
-	"net"
-	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -15,10 +13,13 @@ import (
 	"time"
 
 	"github.com/spare-run/spare/internal/discovery"
+	"github.com/spare-run/spare/internal/health"
+	instancepkg "github.com/spare-run/spare/internal/instance"
 	"github.com/spare-run/spare/internal/logs"
 	"github.com/spare-run/spare/internal/model"
-	"github.com/spare-run/spare/internal/profile"
-	"github.com/spare-run/spare/internal/site"
+	"github.com/spare-run/spare/internal/network"
+	"github.com/spare-run/spare/internal/recipe"
+	spareRuntime "github.com/spare-run/spare/internal/runtime"
 	"github.com/spare-run/spare/internal/state"
 )
 
@@ -37,16 +38,12 @@ func (e *ManagerError) Error() string {
 	return e.Message
 }
 
-type CreateRequest struct {
-	Mode     string
-	RootPath string
-	Port     int
-	PortMode string
-}
+type CreateRequest = instancepkg.CreateRequest
 
 type worker struct {
 	instance      model.Instance
-	cmd           *exec.Cmd
+	process       spareRuntime.Process
+	runtime       spareRuntime.Runtime
 	log           io.WriteCloser
 	mdns          io.Closer
 	healthPort    int
@@ -63,29 +60,37 @@ type Manager struct {
 	mu       sync.Mutex
 	store    *state.Store
 	logsDir  string
-	exe      string
 	machine  model.Machine
+	registry *recipe.Registry
+	runtimes map[string]spareRuntime.Runtime
 	workers  map[string]*worker
 	ctx      context.Context
 	cancel   context.CancelFunc
-	http     *http.Client
+	checker  health.Checker
 	closed   bool
 	waitDone chan struct{}
 }
 
-func New(store *state.Store, logsDir, executable string, machine model.Machine) (*Manager, error) {
+func New(
+	store *state.Store,
+	logsDir string,
+	machine model.Machine,
+	registry *recipe.Registry,
+	runtimes map[string]spareRuntime.Runtime,
+) (*Manager, error) {
+	if registry == nil {
+		return nil, errors.New("recipe registry is required")
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	manager := &Manager{
-		store:   store,
-		logsDir: logsDir,
-		exe:     executable,
-		machine: machine,
-		workers: map[string]*worker{},
-		ctx:     ctx,
-		cancel:  cancel,
-		http: &http.Client{
-			Timeout: 2 * time.Second,
-		},
+		store:    store,
+		logsDir:  logsDir,
+		machine:  machine,
+		registry: registry,
+		runtimes: runtimes,
+		workers:  map[string]*worker{},
+		ctx:      ctx,
+		cancel:   cancel,
 		waitDone: make(chan struct{}),
 	}
 	instances, err := store.Instances(context.Background())
@@ -93,61 +98,129 @@ func New(store *state.Store, logsDir, executable string, machine model.Machine) 
 		cancel()
 		return nil, err
 	}
-	for _, instance := range instances {
-		instance.Status = model.StatusStopped
-		manager.workers[instance.ID] = &worker{instance: instance}
+	for _, stored := range instances {
+		migrated, migrateErr := manager.migrateInstance(stored)
+		if migrateErr != nil {
+			cancel()
+			return nil, migrateErr
+		}
+		migrated.Status = model.StatusStopped
+		driver, ok := runtimes[migrated.Runtime]
+		if !ok {
+			cancel()
+			return nil, fmt.Errorf("runtime %q is unavailable for %s", migrated.Runtime, migrated.ID)
+		}
+		manager.workers[migrated.ID] = &worker{instance: migrated, runtime: driver}
+		_ = store.PutInstance(context.Background(), migrated)
 	}
 	go manager.watchLeases()
 	return manager, nil
 }
 
+func (m *Manager) migrateInstance(stored model.Instance) (model.Instance, error) {
+	implementation, ok := m.registry.Get(stored.RecipeID)
+	if !ok {
+		return model.Instance{}, fmt.Errorf("installed recipe %q is unavailable", stored.RecipeID)
+	}
+	manifest := implementation.Manifest()
+	if stored.Version == "" {
+		stored.Version = manifest.Version
+	}
+	if stored.Runtime == "" {
+		stored.Runtime = manifest.Runtime.Type
+	}
+	if stored.Config == nil {
+		stored.Config = map[string]any{}
+		if manifest.Storage.PathField != "" && stored.RootPath != "" {
+			stored.Config[manifest.Storage.PathField] = stored.RootPath
+		}
+	}
+	if stored.DataPath == "" {
+		stored.DataPath = stored.RootPath
+	}
+	return stored, nil
+}
+
 func (m *Manager) Restore() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for _, runtime := range m.workers {
-		if runtime.instance.Mode == model.ModeInstalled && runtime.instance.DesiredState == model.DesiredRunning {
-			if err := m.launchLocked(runtime); err != nil {
-				m.failLocked(runtime, "worker_start_failed", err.Error(), "Run `spare doctor` and check the Site logs.")
+	for _, current := range m.workers {
+		if current.instance.Mode == model.ModeInstalled && current.instance.DesiredState == model.DesiredRunning {
+			if err := m.launchLocked(current); err != nil {
+				title := m.title(current.instance.RecipeID)
+				m.failLocked(current, "worker_start_failed", "Unable to start "+title+".", "Run `spare doctor` and check the recipe logs.")
 			}
 		}
 	}
 }
 
+func (m *Manager) Recipes() []model.Recipe {
+	return m.registry.Models(m.machine)
+}
+
 func (m *Manager) Create(request CreateRequest) (model.Instance, error) {
-	root, err := site.ValidateRoot(request.RootPath)
-	if err != nil {
+	implementation, ok := m.registry.Get(request.RecipeID)
+	if !ok {
 		return model.Instance{}, &ManagerError{
-			Code:    "invalid_site_folder",
-			Message: err.Error(),
-			Hint:    "Choose a readable folder that contains the files you want to share.",
+			Code:    "unknown_recipe",
+			Message: fmt.Sprintf("Recipe %q is not available.", request.RecipeID),
+			Hint:    "Run `spare recipe list` to see built-in recipes.",
 		}
 	}
-	if request.Mode != model.ModeTemporary && request.Mode != model.ModeInstalled {
-		return model.Instance{}, &ManagerError{Code: "invalid_mode", Message: "The Site mode is invalid."}
+	manifest := implementation.Manifest()
+	compatibility := manifest.Compatible(m.machine)
+	if !compatibility.Supported {
+		return model.Instance{}, &ManagerError{
+			Code:    "recipe_not_supported",
+			Message: manifest.Name + " is not supported on this computer.",
+			Hint:    strings.Join(compatibility.Reasons, " "),
+		}
 	}
-	if request.PortMode == "" {
-		request.PortMode = "auto"
+	candidate, err := instancepkg.Build(m.registry, request)
+	if err != nil {
+		return model.Instance{}, &ManagerError{
+			Code:    "invalid_recipe_configuration",
+			Message: "The " + manifest.Name + " configuration is invalid.",
+			Hint:    err.Error(),
+		}
 	}
 
 	m.mu.Lock()
-	if existing, ok := m.workers[model.RecipeSite]; ok {
-		if sameConfiguration(existing.instance, request, root) {
-			instance := m.decorate(existing.instance)
+	if existing := m.onlyWorkerLocked(); existing != nil {
+		if instancepkg.SameConfiguration(existing.instance, request, candidate) {
+			result := m.decorate(existing.instance)
 			m.mu.Unlock()
-			return instance, nil
+			return result, nil
 		}
+		existingTitle := m.title(existing.instance.RecipeID)
 		m.mu.Unlock()
 		return model.Instance{}, &ManagerError{
 			Code:    "role_already_exists",
-			Message: "This computer already has a Site.",
-			Hint:    "Remove the current Site before choosing a different folder or port.",
+			Message: "This computer is already a " + existingTitle + ".",
+			Hint:    "Remove the current role before installing a different recipe or configuration.",
 		}
 	}
 	m.mu.Unlock()
 
-	port, err := selectPort(request.Port, request.PortMode)
+	port, err := network.SelectPort(request.Port, candidate.PortMode)
 	if err != nil {
-		return model.Instance{}, err
+		return model.Instance{}, managerNetworkError(err)
+	}
+	candidate.Port = port
+	driver, ok := m.runtimes[candidate.Runtime]
+	if !ok {
+		return model.Instance{}, &ManagerError{
+			Code:    "runtime_unavailable",
+			Message: fmt.Sprintf("The %s runtime is unavailable.", candidate.Runtime),
+			Hint:    "Reinstall Spare and try again.",
+		}
+	}
+	if err := driver.Prepare(context.Background(), candidate); err != nil {
+		return model.Instance{}, &ManagerError{
+			Code:    "runtime_prepare_failed",
+			Message: "Unable to prepare " + manifest.Name + ".",
+			Hint:    err.Error(),
+		}
 	}
 
 	m.mu.Lock()
@@ -155,70 +228,52 @@ func (m *Manager) Create(request CreateRequest) (model.Instance, error) {
 	if m.closed {
 		return model.Instance{}, &ManagerError{Code: "daemon_stopping", Message: "Spare is stopping.", Hint: "Try again in a moment."}
 	}
-	if existing, ok := m.workers[model.RecipeSite]; ok {
-		if sameConfiguration(existing.instance, request, root) {
+	if existing := m.onlyWorkerLocked(); existing != nil {
+		if instancepkg.SameConfiguration(existing.instance, request, candidate) {
 			return m.decorate(existing.instance), nil
 		}
 		return model.Instance{}, &ManagerError{
 			Code:    "role_already_exists",
-			Message: "This computer already has a Site.",
-			Hint:    "Remove the current Site before choosing a different folder or port.",
+			Message: "This computer already has a role.",
+			Hint:    "Remove the current role before installing another one.",
 		}
 	}
 
-	now := time.Now().UTC()
-	instance := model.Instance{
-		ID:           model.RecipeSite,
-		RecipeID:     model.RecipeSite,
-		Mode:         request.Mode,
-		DesiredState: model.DesiredRunning,
-		Status:       model.StatusStarting,
-		RootPath:     root,
-		Port:         port,
-		PortMode:     request.PortMode,
-		CreatedAt:    now,
-		UpdatedAt:    now,
-	}
-	runtime := &worker{instance: instance}
+	current := &worker{instance: candidate, runtime: driver}
 	if request.Mode == model.ModeTemporary {
-		runtime.leaseUntil = now.Add(leaseDuration)
+		current.leaseUntil = time.Now().Add(leaseDuration)
 	}
-	m.workers[instance.ID] = runtime
+	m.workers[candidate.ID] = current
 	if request.Mode == model.ModeInstalled {
-		if err := m.store.PutInstance(context.Background(), instance); err != nil {
-			delete(m.workers, instance.ID)
+		if err := m.store.PutInstance(context.Background(), candidate); err != nil {
+			delete(m.workers, candidate.ID)
 			return model.Instance{}, err
 		}
 	}
-	if err := m.launchLocked(runtime); err != nil {
-		delete(m.workers, instance.ID)
+	if err := m.launchLocked(current); err != nil {
+		delete(m.workers, candidate.ID)
 		if request.Mode == model.ModeInstalled {
-			_ = m.store.DeleteInstance(context.Background(), instance.ID)
+			_ = m.store.DeleteInstance(context.Background(), candidate.ID)
 		}
 		return model.Instance{}, &ManagerError{
 			Code:    "worker_start_failed",
-			Message: "Unable to start Site.",
+			Message: "Unable to start " + manifest.Name + ".",
 			Hint:    err.Error(),
 		}
 	}
-	m.eventLocked(runtime, "info", "site_created", "Site started.", map[string]any{"mode": request.Mode, "port": port})
-	return m.decorate(runtime.instance), nil
-}
-
-func sameConfiguration(instance model.Instance, request CreateRequest, root string) bool {
-	return instance.Mode == model.ModeInstalled &&
-		request.Mode == model.ModeInstalled &&
-		instance.RootPath == root &&
-		instance.PortMode == request.PortMode &&
-		(request.PortMode == "auto" || instance.Port == request.Port)
+	m.eventLocked(current, "info", "instance_created", manifest.Name+" started.", map[string]any{
+		"mode": request.Mode,
+		"port": port,
+	})
+	return m.decorate(current.instance), nil
 }
 
 func (m *Manager) List() []model.Instance {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	result := make([]model.Instance, 0, len(m.workers))
-	for _, runtime := range m.workers {
-		result = append(result, m.decorate(runtime.instance))
+	for _, current := range m.workers {
+		result = append(result, m.decorate(current.instance))
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
@@ -227,95 +282,97 @@ func (m *Manager) List() []model.Instance {
 func (m *Manager) Get(id string) (model.Instance, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	runtime, ok := m.workers[id]
+	current, ok := m.workers[id]
 	if !ok {
-		return model.Instance{}, &ManagerError{Code: "instance_not_found", Message: "Site is not installed.", Hint: "Run `spare install site --path <folder>` first."}
+		return model.Instance{}, instanceNotFound(id)
 	}
-	return m.decorate(runtime.instance), nil
+	return m.decorate(current.instance), nil
 }
 
 func (m *Manager) Start(id string) (model.Instance, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	runtime, ok := m.workers[id]
+	current, ok := m.workers[id]
 	if !ok {
-		return model.Instance{}, &ManagerError{Code: "instance_not_found", Message: "Site is not installed."}
+		return model.Instance{}, instanceNotFound(id)
 	}
-	if runtime.cmd != nil && runtime.instance.DesiredState == model.DesiredRunning {
-		return m.decorate(runtime.instance), nil
+	if current.process != nil && current.instance.DesiredState == model.DesiredRunning {
+		return m.decorate(current.instance), nil
 	}
-	runtime.instance.DesiredState = model.DesiredRunning
-	runtime.explicitStop = false
-	runtime.crashes = nil
-	if runtime.instance.Mode == model.ModeTemporary {
-		runtime.leaseUntil = time.Now().Add(leaseDuration)
+	current.instance.DesiredState = model.DesiredRunning
+	current.explicitStop = false
+	current.crashes = nil
+	if current.instance.Mode == model.ModeTemporary {
+		current.leaseUntil = time.Now().Add(leaseDuration)
 	}
-	if err := m.launchLocked(runtime); err != nil {
-		m.failLocked(runtime, "worker_start_failed", "Unable to start Site.", err.Error())
+	if err := m.launchLocked(current); err != nil {
+		title := m.title(current.instance.RecipeID)
+		m.failLocked(current, "worker_start_failed", "Unable to start "+title+".", err.Error())
 		return model.Instance{}, err
 	}
-	m.eventLocked(runtime, "info", "site_started", "Site started.", nil)
-	return m.decorate(runtime.instance), nil
+	m.eventLocked(current, "info", "instance_started", m.title(current.instance.RecipeID)+" started.", nil)
+	return m.decorate(current.instance), nil
 }
 
 func (m *Manager) Stop(id string) (model.Instance, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	runtime, ok := m.workers[id]
+	current, ok := m.workers[id]
 	if !ok {
-		return model.Instance{}, &ManagerError{Code: "instance_not_found", Message: "Site is not installed."}
+		return model.Instance{}, instanceNotFound(id)
 	}
-	if runtime.instance.DesiredState == model.DesiredStopped && runtime.cmd == nil {
-		return m.decorate(runtime.instance), nil
+	if current.instance.DesiredState == model.DesiredStopped && current.process == nil {
+		return m.decorate(current.instance), nil
 	}
-	runtime.instance.DesiredState = model.DesiredStopped
-	runtime.explicitStop = true
-	m.stopProcessLocked(runtime)
-	runtime.instance.Status = model.StatusStopped
-	runtime.instance.Problem = nil
-	runtime.instance.UpdatedAt = time.Now().UTC()
-	m.persistLocked(runtime)
-	m.eventLocked(runtime, "info", "site_stopped", "Site stopped.", nil)
-	return m.decorate(runtime.instance), nil
+	current.instance.DesiredState = model.DesiredStopped
+	current.explicitStop = true
+	m.stopProcessLocked(current)
+	current.instance.Status = model.StatusStopped
+	current.instance.Problem = nil
+	current.instance.UpdatedAt = time.Now().UTC()
+	m.persistLocked(current)
+	m.eventLocked(current, "info", "instance_stopped", m.title(current.instance.RecipeID)+" stopped.", nil)
+	return m.decorate(current.instance), nil
 }
 
 func (m *Manager) Heartbeat(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	runtime, ok := m.workers[id]
-	if !ok || runtime.instance.Mode != model.ModeTemporary {
-		return &ManagerError{Code: "temporary_instance_not_found", Message: "The temporary Site is no longer running."}
+	current, ok := m.workers[id]
+	if !ok || current.instance.Mode != model.ModeTemporary {
+		return &ManagerError{Code: "temporary_instance_not_found", Message: "The temporary recipe is no longer running."}
 	}
-	runtime.leaseUntil = time.Now().Add(leaseDuration)
+	current.leaseUntil = time.Now().Add(leaseDuration)
 	return nil
 }
 
 func (m *Manager) Remove(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	runtime, ok := m.workers[id]
+	current, ok := m.workers[id]
 	if !ok {
-		return &ManagerError{Code: "instance_not_found", Message: "Site is not installed."}
+		return instanceNotFound(id)
 	}
-	runtime.instance.Status = model.StatusRemoving
-	runtime.instance.DesiredState = model.DesiredStopped
-	runtime.explicitStop = true
-	m.stopProcessLocked(runtime)
-	if runtime.instance.Mode == model.ModeInstalled {
+	title := m.title(current.instance.RecipeID)
+	current.instance.Status = model.StatusRemoving
+	current.instance.DesiredState = model.DesiredStopped
+	current.explicitStop = true
+	m.stopProcessLocked(current)
+	if err := current.runtime.Remove(context.Background(), current.instance); err != nil {
+		return err
+	}
+	if current.instance.Mode == model.ModeInstalled {
 		if err := m.store.DeleteInstance(context.Background(), id); err != nil && !state.IsNotFound(err) {
 			return err
 		}
 	}
 	delete(m.workers, id)
-	_ = os.Remove(filepath.Join(m.logsDir, id+".log"))
-	for index := 1; index <= 5; index++ {
-		_ = os.Remove(fmt.Sprintf("%s.%d", filepath.Join(m.logsDir, id+".log"), index))
-	}
+	removeLogs(m.logsDir, id)
 	_ = m.store.AddEvent(context.Background(), model.Event{
 		InstanceID: id,
 		Level:      "info",
-		Kind:       "site_removed",
-		Message:    "Site was removed. The served folder was left unchanged.",
+		Kind:       "instance_removed",
+		Message:    title + " was removed. Its selected folder was left unchanged.",
 	})
 	return nil
 }
@@ -328,11 +385,11 @@ func (m *Manager) Shutdown() {
 		return
 	}
 	m.closed = true
-	for _, runtime := range m.workers {
-		if runtime.restartTimer != nil {
-			runtime.restartTimer.Stop()
+	for _, current := range m.workers {
+		if current.restartTimer != nil {
+			current.restartTimer.Stop()
 		}
-		m.stopProcessLocked(runtime)
+		m.stopProcessLocked(current)
 	}
 	m.mu.Unlock()
 	select {
@@ -341,131 +398,109 @@ func (m *Manager) Shutdown() {
 	}
 }
 
-func (m *Manager) launchLocked(runtime *worker) error {
-	if runtime.cmd != nil {
+func (m *Manager) launchLocked(current *worker) error {
+	if current.process != nil {
 		return nil
 	}
-	port := runtime.instance.Port
-	if !portAvailable(port) {
-		if runtime.instance.PortMode == "auto" {
-			selected, err := selectPort(0, "auto")
+	port := current.instance.Port
+	if !network.PortAvailable(port) {
+		if current.instance.PortMode == "auto" {
+			selected, err := network.SelectPort(0, "auto")
 			if err != nil {
 				return err
 			}
 			port = selected
-			runtime.instance.Port = selected
-			m.eventLocked(runtime, "warning", "port_changed", "Site moved to a free local port.", map[string]any{"port": selected})
+			current.instance.Port = selected
+			m.eventLocked(current, "warning", "port_changed", m.title(current.instance.RecipeID)+" moved to a free local port.", map[string]any{"port": selected})
 		} else {
 			return &ManagerError{
 				Code:    "port_in_use",
 				Message: fmt.Sprintf("Port %d is already in use.", port),
-				Hint:    "Remove and reinstall Site with `--port auto` or another port.",
+				Hint:    "Remove and reinstall the recipe with `--port auto` or another port.",
 			}
 		}
 	}
-	healthPort, err := freeLoopbackPort()
+	healthPort, err := network.FreeLoopbackPort()
 	if err != nil {
 		return err
 	}
-	logWriter, err := logs.NewRotatingWriter(filepath.Join(m.logsDir, runtime.instance.ID+".log"), 5*1024*1024, 5)
+	logWriter, err := logs.NewRotatingWriter(filepath.Join(m.logsDir, current.instance.ID+".log"), 5*1024*1024, 5)
 	if err != nil {
 		return err
 	}
-	command := exec.CommandContext(
-		m.ctx,
-		m.exe,
-		"worker",
-		"site",
-		"--path",
-		runtime.instance.RootPath,
-		"--port",
-		fmt.Sprintf("%d", runtime.instance.Port),
-		"--health-port",
-		fmt.Sprintf("%d", healthPort),
-	)
-	command.Stdout = logWriter
-	command.Stderr = logWriter
-	if err := command.Start(); err != nil {
+	process, err := current.runtime.Start(m.ctx, current.instance, healthPort, logWriter, logWriter)
+	if err != nil {
 		_ = logWriter.Close()
 		return err
 	}
 
-	runtime.generation++
-	generation := runtime.generation
-	runtime.cmd = command
-	runtime.log = logWriter
-	runtime.healthPort = healthPort
-	runtime.healthFails = 0
-	runtime.healthyBefore = false
-	runtime.instance.Status = model.StatusStarting
-	runtime.instance.Problem = nil
-	runtime.instance.UpdatedAt = time.Now().UTC()
-	m.persistLocked(runtime)
+	current.generation++
+	generation := current.generation
+	current.process = process
+	current.log = logWriter
+	current.healthPort = healthPort
+	current.healthFails = 0
+	current.healthyBefore = false
+	current.instance.Status = model.StatusStarting
+	current.instance.Problem = nil
+	current.instance.UpdatedAt = time.Now().UTC()
+	m.persistLocked(current)
 
-	go m.wait(runtime.instance.ID, generation, command)
-	go m.monitor(runtime.instance.ID, generation, healthPort)
+	go m.wait(current.instance.ID, generation, process)
+	go m.monitor(current.instance.ID, generation, healthPort)
 	return nil
 }
 
-func (m *Manager) wait(id string, generation uint64, command *exec.Cmd) {
-	err := command.Wait()
+func (m *Manager) wait(id string, generation uint64, process spareRuntime.Process) {
+	err := process.Wait()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	runtime, ok := m.workers[id]
-	if !ok || runtime.generation != generation || runtime.cmd != command {
+	current, ok := m.workers[id]
+	if !ok || current.generation != generation || current.process != process {
 		return
 	}
-	if runtime.log != nil {
-		_ = runtime.log.Close()
-		runtime.log = nil
+	if current.log != nil {
+		_ = current.log.Close()
+		current.log = nil
 	}
-	runtime.cmd = nil
-	m.stopMDNSLocked(runtime)
+	current.process = nil
+	m.stopMDNSLocked(current)
 
-	if runtime.instance.DesiredState == model.DesiredStopped || runtime.explicitStop || m.closed {
-		runtime.instance.Status = model.StatusStopped
-		runtime.instance.UpdatedAt = time.Now().UTC()
-		m.persistLocked(runtime)
+	if current.instance.DesiredState == model.DesiredStopped || current.explicitStop || m.closed {
+		current.instance.Status = model.StatusStopped
+		current.instance.UpdatedAt = time.Now().UTC()
+		m.persistLocked(current)
 		return
 	}
-	if runtime.instance.Mode == model.ModeTemporary && time.Now().After(runtime.leaseUntil) {
+	if current.instance.Mode == model.ModeTemporary && time.Now().After(current.leaseUntil) {
 		delete(m.workers, id)
 		return
 	}
 
 	now := time.Now()
-	cutoff := now.Add(-5 * time.Minute)
-	var crashes []time.Time
-	for _, crash := range runtime.crashes {
-		if crash.After(cutoff) {
-			crashes = append(crashes, crash)
-		}
-	}
-	runtime.crashes = append(crashes, now)
-	if len(runtime.crashes) >= 5 {
-		m.failLocked(runtime, "restart_limit_reached", "Site stopped after repeatedly failing.", "Check `spare logs site`, then run `spare start site` after fixing the problem.")
+	current.crashes = append(recentCrashes(current.crashes, now, 5*time.Minute), now)
+	title := m.title(current.instance.RecipeID)
+	if len(current.crashes) >= 5 {
+		m.failLocked(current, "restart_limit_reached", title+" stopped after repeatedly failing.", "Check the recipe logs, then start it again after fixing the problem.")
 		return
 	}
 
-	delay := time.Second << (len(runtime.crashes) - 1)
-	if delay > 30*time.Second {
-		delay = 30 * time.Second
-	}
-	message := "Site stopped unexpectedly. Spare will restart it."
+	delay := restartDelay(len(current.crashes))
+	message := title + " stopped unexpectedly. Spare will restart it."
 	if err != nil {
-		message = fmt.Sprintf("Site stopped unexpectedly (%s). Spare will restart it.", err)
+		message = fmt.Sprintf("%s stopped unexpectedly (%s). Spare will restart it.", title, err)
 	}
-	runtime.instance.Status = model.StatusDegraded
-	runtime.instance.Problem = &model.Problem{
+	current.instance.Status = model.StatusDegraded
+	current.instance.Problem = &model.Problem{
 		Code:     "worker_exited",
 		Severity: "warning",
 		Summary:  message,
-		Recovery: "Spare is restarting Site automatically.",
+		Recovery: "Spare is restarting the recipe automatically.",
 	}
-	runtime.instance.UpdatedAt = time.Now().UTC()
-	m.persistLocked(runtime)
-	m.eventLocked(runtime, "warning", "worker_exited", message, map[string]any{"restartInSeconds": int(delay.Seconds())})
-	runtime.restartTimer = time.AfterFunc(delay, func() {
+	current.instance.UpdatedAt = time.Now().UTC()
+	m.persistLocked(current)
+	m.eventLocked(current, "warning", "worker_exited", message, map[string]any{"restartInSeconds": int(delay.Seconds())})
+	current.restartTimer = time.AfterFunc(delay, func() {
 		m.restart(id, generation)
 	})
 }
@@ -473,75 +508,71 @@ func (m *Manager) wait(id string, generation uint64, command *exec.Cmd) {
 func (m *Manager) restart(id string, generation uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	runtime, ok := m.workers[id]
-	if !ok || runtime.generation != generation || runtime.cmd != nil || runtime.instance.DesiredState != model.DesiredRunning || m.closed {
+	current, ok := m.workers[id]
+	if !ok || current.generation != generation || current.process != nil ||
+		current.instance.DesiredState != model.DesiredRunning || m.closed {
 		return
 	}
-	if runtime.instance.Mode == model.ModeTemporary && time.Now().After(runtime.leaseUntil) {
+	if current.instance.Mode == model.ModeTemporary && time.Now().After(current.leaseUntil) {
 		delete(m.workers, id)
 		return
 	}
-	if err := m.launchLocked(runtime); err != nil {
-		m.failLocked(runtime, "worker_restart_failed", "Unable to restart Site.", err.Error())
+	if err := m.launchLocked(current); err != nil {
+		m.failLocked(current, "worker_restart_failed", "Unable to restart "+m.title(current.instance.RecipeID)+".", err.Error())
 	}
 }
 
 func (m *Manager) monitor(id string, generation uint64, healthPort int) {
-	timer := time.NewTicker(time.Second)
+	timer := time.NewTimer(time.Second)
 	defer timer.Stop()
-	checks := 0
 	for {
 		select {
 		case <-m.ctx.Done():
 			return
 		case <-timer.C:
-			checks++
-			if checks > 1 {
-				timer.Reset(healthEvery)
-			}
-			response, err := m.http.Get(fmt.Sprintf("http://127.0.0.1:%d/", healthPort))
-			healthy := err == nil && response.StatusCode == http.StatusOK
-			if response != nil {
-				_ = response.Body.Close()
-			}
+			timer.Reset(healthEvery)
+			checkContext, cancel := context.WithTimeout(m.ctx, 2*time.Second)
+			snapshot, err := m.checker.Check(checkContext, healthPort)
+			cancel()
 			m.mu.Lock()
-			runtime, ok := m.workers[id]
-			if !ok || runtime.generation != generation || runtime.cmd == nil {
+			current, ok := m.workers[id]
+			if !ok || current.generation != generation || current.process == nil {
 				m.mu.Unlock()
 				return
 			}
-			if healthy {
-				runtime.healthFails = 0
-				if !runtime.healthyBefore {
+			if err == nil {
+				current.healthFails = 0
+				current.instance.StorageAvailableBytes = snapshot.StorageAvailableBytes
+				current.instance.ItemCount = snapshot.ItemCount
+				if !current.healthyBefore {
 					now := time.Now().UTC()
-					runtime.healthyBefore = true
-					runtime.instance.Status = model.StatusHealthy
-					runtime.instance.Problem = nil
-					runtime.instance.StartedAt = &now
-					runtime.instance.UpdatedAt = now
-					m.persistLocked(runtime)
-					if runtime.mdns == nil {
-						runtime.mdns, _ = discovery.Advertise(m.machine.Hostname, runtime.instance.Port)
+					current.healthyBefore = true
+					current.instance.Status = model.StatusHealthy
+					current.instance.Problem = nil
+					current.instance.StartedAt = &now
+					current.instance.UpdatedAt = now
+					m.persistLocked(current)
+					if current.mdns == nil {
+						current.mdns, _ = discovery.Advertise(m.machine.Hostname, current.instance.Port)
 					}
-					m.eventLocked(runtime, "info", "site_healthy", "Site is ready.", nil)
+					m.eventLocked(current, "info", "instance_healthy", m.title(current.instance.RecipeID)+" is ready.", nil)
 				}
 				m.mu.Unlock()
 				continue
 			}
-			runtime.healthFails++
-			if runtime.healthFails >= 3 {
-				runtime.instance.Status = model.StatusDegraded
-				runtime.instance.Problem = &model.Problem{
+			current.healthFails++
+			if current.healthFails >= 3 {
+				title := m.title(current.instance.RecipeID)
+				current.instance.Status = model.StatusDegraded
+				current.instance.Problem = &model.Problem{
 					Code:     "health_check_failed",
 					Severity: "warning",
-					Summary:  "Site stopped responding.",
-					Recovery: "Spare is restarting Site automatically.",
+					Summary:  title + " stopped responding.",
+					Recovery: "Spare is restarting the recipe automatically.",
 				}
-				runtime.instance.UpdatedAt = time.Now().UTC()
-				m.persistLocked(runtime)
-				if runtime.cmd != nil && runtime.cmd.Process != nil {
-					_ = runtime.cmd.Process.Kill()
-				}
+				current.instance.UpdatedAt = time.Now().UTC()
+				m.persistLocked(current)
+				_ = current.runtime.Stop(context.Background(), current.instance, current.process)
 				m.mu.Unlock()
 				return
 			}
@@ -559,75 +590,79 @@ func (m *Manager) watchLeases() {
 		case <-m.ctx.Done():
 			return
 		case <-ticker.C:
-			m.mu.Lock()
-			now := time.Now()
-			for id, runtime := range m.workers {
-				if runtime.instance.Mode != model.ModeTemporary || now.Before(runtime.leaseUntil) {
-					continue
-				}
-				runtime.instance.DesiredState = model.DesiredStopped
-				runtime.explicitStop = true
-				m.stopProcessLocked(runtime)
-				delete(m.workers, id)
-				_ = m.store.AddEvent(context.Background(), model.Event{
-					InstanceID: id,
-					Level:      "info",
-					Kind:       "temporary_site_expired",
-					Message:    "Temporary Site stopped after its terminal closed.",
-				})
-			}
-			m.mu.Unlock()
+			m.expireLeases(time.Now())
 		}
 	}
 }
 
-func (m *Manager) stopProcessLocked(runtime *worker) {
-	if runtime.restartTimer != nil {
-		runtime.restartTimer.Stop()
-		runtime.restartTimer = nil
-	}
-	m.stopMDNSLocked(runtime)
-	if runtime.cmd != nil && runtime.cmd.Process != nil {
-		runtime.generation++
-		command := runtime.cmd
-		runtime.cmd = nil
-		_ = command.Process.Kill()
-	}
-	if runtime.log != nil {
-		_ = runtime.log.Close()
-		runtime.log = nil
-	}
-}
-
-func (m *Manager) stopMDNSLocked(runtime *worker) {
-	if runtime.mdns != nil {
-		_ = runtime.mdns.Close()
-		runtime.mdns = nil
+func (m *Manager) expireLeases(now time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, current := range m.workers {
+		if current.instance.Mode != model.ModeTemporary || now.Before(current.leaseUntil) {
+			continue
+		}
+		title := m.title(current.instance.RecipeID)
+		current.instance.DesiredState = model.DesiredStopped
+		current.explicitStop = true
+		m.stopProcessLocked(current)
+		delete(m.workers, id)
+		_ = m.store.AddEvent(context.Background(), model.Event{
+			InstanceID: id,
+			Level:      "info",
+			Kind:       "temporary_instance_expired",
+			Message:    "Temporary " + title + " stopped after its terminal closed.",
+		})
 	}
 }
 
-func (m *Manager) failLocked(runtime *worker, code, summary, recovery string) {
-	runtime.instance.Status = model.StatusFailed
-	runtime.instance.Problem = &model.Problem{
+func (m *Manager) stopProcessLocked(current *worker) {
+	if current.restartTimer != nil {
+		current.restartTimer.Stop()
+		current.restartTimer = nil
+	}
+	m.stopMDNSLocked(current)
+	if current.process != nil {
+		current.generation++
+		process := current.process
+		current.process = nil
+		_ = current.runtime.Stop(context.Background(), current.instance, process)
+	}
+	if current.log != nil {
+		_ = current.log.Close()
+		current.log = nil
+	}
+}
+
+func (m *Manager) stopMDNSLocked(current *worker) {
+	if current.mdns != nil {
+		_ = current.mdns.Close()
+		current.mdns = nil
+	}
+}
+
+func (m *Manager) failLocked(current *worker, code, summary, recovery string) {
+	current.instance.Status = model.StatusFailed
+	current.instance.Problem = &model.Problem{
 		Code:     code,
 		Severity: "error",
 		Summary:  summary,
 		Recovery: recovery,
 	}
-	runtime.instance.UpdatedAt = time.Now().UTC()
-	m.persistLocked(runtime)
-	m.eventLocked(runtime, "error", code, summary, nil)
+	current.instance.UpdatedAt = time.Now().UTC()
+	m.persistLocked(current)
+	m.eventLocked(current, "error", code, summary, nil)
 }
 
-func (m *Manager) persistLocked(runtime *worker) {
-	if runtime.instance.Mode == model.ModeInstalled {
-		_ = m.store.PutInstance(context.Background(), runtime.instance)
+func (m *Manager) persistLocked(current *worker) {
+	if current.instance.Mode == model.ModeInstalled {
+		_ = m.store.PutInstance(context.Background(), current.instance)
 	}
 }
 
-func (m *Manager) eventLocked(runtime *worker, level, kind, message string, details map[string]any) {
+func (m *Manager) eventLocked(current *worker, level, kind, message string, details map[string]any) {
 	_ = m.store.AddEvent(context.Background(), model.Event{
-		InstanceID: runtime.instance.ID,
+		InstanceID: current.instance.ID,
 		Level:      level,
 		Kind:       kind,
 		Message:    message,
@@ -636,76 +671,70 @@ func (m *Manager) eventLocked(runtime *worker, level, kind, message string, deta
 }
 
 func (m *Manager) decorate(instance model.Instance) model.Instance {
-	urls := []string{fmt.Sprintf("http://127.0.0.1:%d", instance.Port)}
-	addresses := profile.LANAddresses()
-	for _, address := range addresses {
-		urls = append(urls, "http://"+net.JoinHostPort(address, fmt.Sprintf("%d", instance.Port)))
-	}
-	if hostname := mdnsHostname(m.machine.Hostname); hostname != "" {
-		urls = append(urls, fmt.Sprintf("http://%s.local:%d", hostname, instance.Port))
-	}
-	instance.URLs = urls
+	instance.URLs = network.URLs(network.Endpoints(m.machine.Hostname, instance.Port))
 	return instance
 }
 
-func selectPort(requested int, mode string) (int, error) {
-	if mode == "fixed" || requested > 0 {
-		if requested < 1 || requested > 65535 {
-			return 0, &ManagerError{Code: "invalid_port", Message: "Choose a port between 1 and 65535."}
-		}
-		if !portAvailable(requested) {
-			return 0, &ManagerError{
-				Code:    "port_in_use",
-				Message: fmt.Sprintf("Port %d is already in use.", requested),
-				Hint:    "Use `--port auto` or choose another port.",
-			}
-		}
-		return requested, nil
+func (m *Manager) title(id string) string {
+	if implementation, ok := m.registry.Get(id); ok {
+		return implementation.Manifest().Name
 	}
-	for port := 7340; port <= 7399; port++ {
-		if portAvailable(port) {
-			return port, nil
+	return id
+}
+
+func (m *Manager) onlyWorkerLocked() *worker {
+	for _, current := range m.workers {
+		return current
+	}
+	return nil
+}
+
+func managerNetworkError(err error) error {
+	var networkError *network.Error
+	if errors.As(err, &networkError) {
+		return &ManagerError{
+			Code:    networkError.Code,
+			Message: networkError.Message,
+			Hint:    networkError.Hint,
 		}
 	}
-	return 0, &ManagerError{
-		Code:    "no_site_port_available",
-		Message: "Spare could not find a free Site port.",
-		Hint:    "Close another local service or choose a specific free port.",
+	return err
+}
+
+func instanceNotFound(id string) *ManagerError {
+	return &ManagerError{
+		Code:    "instance_not_found",
+		Message: fmt.Sprintf("Recipe %q is not installed.", id),
+		Hint:    "Run `spare recipe list` to see available recipes.",
 	}
 }
 
-func portAvailable(port int) bool {
-	listener, err := net.Listen("tcp4", fmt.Sprintf("0.0.0.0:%d", port))
-	if err != nil {
-		return false
+func removeLogs(logsDir, id string) {
+	logPath := filepath.Join(logsDir, id+".log")
+	_ = os.Remove(logPath)
+	for index := 1; index <= 5; index++ {
+		_ = os.Remove(fmt.Sprintf("%s.%d", logPath, index))
 	}
-	_ = listener.Close()
-	return true
 }
 
-func freeLoopbackPort() (int, error) {
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
-	}
-	defer listener.Close()
-	return listener.Addr().(*net.TCPAddr).Port, nil
-}
-
-func mdnsHostname(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	value = strings.TrimSuffix(value, ".local")
-	var result strings.Builder
-	lastDash := false
-	for _, character := range value {
-		valid := character >= 'a' && character <= 'z' || character >= '0' && character <= '9'
-		if valid {
-			result.WriteRune(character)
-			lastDash = false
-		} else if !lastDash && result.Len() > 0 {
-			result.WriteByte('-')
-			lastDash = true
+func recentCrashes(crashes []time.Time, now time.Time, window time.Duration) []time.Time {
+	cutoff := now.Add(-window)
+	result := make([]time.Time, 0, len(crashes))
+	for _, crash := range crashes {
+		if crash.After(cutoff) {
+			result = append(result, crash)
 		}
 	}
-	return strings.Trim(result.String(), "-")
+	return result
+}
+
+func restartDelay(crashCount int) time.Duration {
+	if crashCount < 1 {
+		crashCount = 1
+	}
+	delay := time.Second << (crashCount - 1)
+	if delay > 30*time.Second {
+		return 30 * time.Second
+	}
+	return delay
 }

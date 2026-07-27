@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS events (
 	details BLOB,
 	created_at TEXT NOT NULL
 );
-INSERT INTO metadata(key, value) VALUES ('schema_version', '1')
+INSERT INTO metadata(key, value) VALUES ('schema_version', '2')
 	ON CONFLICT(key) DO UPDATE SET value = excluded.value;
 `
 	_, err := s.db.ExecContext(ctx, schema)

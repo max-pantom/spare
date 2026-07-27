@@ -2,7 +2,23 @@
 
 **Spare gives any computer a job.**
 
-This repository contains the `0.1.0` Hosted-mode engineering preview. It can serve one folder as a read-only website, temporarily or as a per-user background service, and manage it through a local CLI and dashboard.
+This repository contains the `0.1.0` Hosted-mode engineering preview. Spare
+profiles the computer and runs one trusted recipe temporarily or as a per-user
+background service.
+
+Three built-in recipes prove the shared runtime:
+
+- **Site** serves one folder as a read-only local website.
+- **Drop** receives browser uploads into one selected folder and offers local
+  download links.
+- **Hook** receives, inspects, and replays webhook requests.
+
+Start with the [documentation index](docs/README.md) for installation, testing,
+usage, repository structure, architecture, security, the project TODO, and the
+original product notes.
+
+For task-by-task instructions for Site, Drop, and Hook, read
+[Use the built-in recipes](docs/BUILT-IN-RECIPES.md).
 
 ## Supported systems
 
@@ -17,7 +33,7 @@ Spare starts after the current user logs in. It does not require administrator p
 
 ## Build
 
-Requirements: Go 1.25.6, Node.js 24, npm, and `make`.
+Requirements: Go 1.25.12, Node.js 24, npm, and `make`.
 
 ```bash
 make build
@@ -39,21 +55,42 @@ bin/spare init
 ```bash
 spare init
 spare try site ./public
+spare try drop ./received-files
+spare try hook
 spare install site --path ./public
+spare install drop --path ./received-files --max-file-size 2GB
+spare install hook
 spare status
 spare open dashboard
-spare open site
-spare stop site
-spare start site
-spare logs site --follow
+spare open drop
+spare open hook
+spare stop drop
+spare start drop
+spare logs drop --follow
 spare doctor
-spare remove site
+spare export drop
+spare remove drop
 spare uninstall
 ```
 
-`spare try` remains attached to its terminal and expires within 15 seconds if its heartbeat disappears. An installed Site restarts after failures and starts automatically after login.
+`spare try` remains attached to its terminal and expires within 15 seconds if
+its heartbeat disappears. An installed recipe restarts after failures and
+starts automatically after login.
 
-Site binds to an automatically selected port from `7340–7399` unless a fixed port is requested. Spare shows localhost, LAN IPv4, and best-effort `.local` addresses. The local network may still require the user to approve an operating-system firewall prompt.
+Recipes bind to an automatically selected port from `7340–7399` unless a fixed
+port is requested. Spare shows localhost, LAN IPv4, and best-effort `.local`
+addresses. The local network may still require the user to approve an
+operating-system firewall prompt.
+
+Recipe development commands are available without installing a third-party
+worker:
+
+```bash
+spare recipe validate ./recipes/drop
+spare recipe pack ./recipes/drop
+spare recipe inspect drop.sp
+spare recipe validate ./recipes/hook
+```
 
 ## Security boundary
 
@@ -61,8 +98,14 @@ Site binds to an automatically selected port from `7340–7399` unless a fixed p
 - CLI requests use a private 256-bit bearer token.
 - Browser access uses a one-time code and an HttpOnly, SameSite cookie. The long-lived token never appears in a browser URL.
 - The Site recipe is read-only. It denies dotfiles, directory listings, traversal, and symlinks that resolve outside the selected folder.
-- The Site itself has no authentication or TLS in this preview. Anyone on the same reachable local network can open its address.
-- `spare remove site` and `spare uninstall` never delete the served folder.
+- Drop accepts writes only through its upload endpoint, rejects unsafe names and
+  symlinks, applies a per-file size limit, and resolves filename collisions.
+- Hook keeps the latest 50 requests in memory, caps bodies at 1 MB, rejects
+  cross-origin browser replays, and does not follow replay redirects.
+- Recipe web interfaces have no authentication or TLS in this preview. Anyone
+  on the same reachable local network can open Site, send files to Drop, or
+  inspect requests and initiate replays through Hook.
+- Remove and uninstall commands never delete a recipe's selected folder.
 
 ## Local API
 
@@ -101,9 +144,16 @@ API errors use:
 make test
 make test-ui
 make smoke
+make recipes VERSION=0.1.0
 make release VERSION=0.1.0
 ```
 
-`make release` creates checksummed archives for macOS, Windows, and Linux on amd64 and arm64 under `dist/releases`.
+`make release` creates checksummed archives for macOS, Windows, and Linux on
+amd64 and arm64, plus the Site, Drop, and Hook `.sp` packages, under
+`dist/releases`.
 
-This preview intentionally excludes `.sp` packages, containers, multiple roles, Drop, SpareOS, remote access, automatic updates, signing, notarization, and telemetry.
+This preview parses, validates, inspects, and packs `.sp` files, but executes
+only the three trusted built-in implementations. It intentionally excludes
+third-party artifact execution, containers, multiple simultaneous roles,
+accounts, remote access, SpareOS, automatic updates, signing, notarization, and
+telemetry.

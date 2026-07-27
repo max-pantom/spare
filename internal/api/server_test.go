@@ -14,6 +14,9 @@ import (
 	"time"
 
 	"github.com/spare-run/spare/internal/model"
+	"github.com/spare-run/spare/internal/recipes"
+	spareRuntime "github.com/spare-run/spare/internal/runtime"
+	"github.com/spare-run/spare/internal/runtime/native"
 	"github.com/spare-run/spare/internal/state"
 	"github.com/spare-run/spare/internal/supervisor"
 )
@@ -33,7 +36,17 @@ func TestAPITokenAndSingleUseBrowserSession(t *testing.T) {
 	if err := store.SaveMachine(context.Background(), machine); err != nil {
 		t.Fatal(err)
 	}
-	manager, err := supervisor.New(store, t.TempDir(), "not-used", machine)
+	registry, err := recipes.Builtins()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := supervisor.New(
+		store,
+		t.TempDir(),
+		machine,
+		registry,
+		map[string]spareRuntime.Runtime{"native": &native.Driver{Executable: "not-used"}},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,6 +131,24 @@ func TestAPITokenAndSingleUseBrowserSession(t *testing.T) {
 		t.Fatalf("expected cross-origin mutation to return 403, got %d", response.StatusCode)
 	}
 	_ = response.Body.Close()
+
+	trailingJSON, _ := http.NewRequest(http.MethodPost, server.URL+"/api/v1/instances", strings.NewReader(`{} {}`))
+	trailingJSON.Header.Set("Authorization", "Bearer secret-token")
+	response, err = http.DefaultClient.Do(trailingJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected multiple JSON values to return 400, got %d", response.StatusCode)
+	}
+	var envelope model.ErrorEnvelope
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if envelope.Error.Code != "invalid_request" {
+		t.Fatalf("error code = %q", envelope.Error.Code)
+	}
 
 	parsed, _ := url.Parse(server.URL)
 	if strings.Contains(created.URL, "secret-token") || !strings.Contains(created.URL, parsed.Host) {

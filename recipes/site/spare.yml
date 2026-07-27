@@ -1,0 +1,47 @@
+schema: spare.recipe/v1
+id: site
+name: Site
+version: 0.1.0
+description: Serve a folder as a read-only website on this computer and the local network.
+support:
+  systems:
+    - darwin
+    - windows
+    - linux
+  architectures:
+    - amd64
+    - arm64
+runtime:
+  type: native
+resources:
+  memoryRecommendedBytes: 67108864
+  memoryMaximumBytes: 268435456
+  cpuMaximum: 1
+  storageMinimumBytes: 1048576
+network:
+  visibility: local
+  port: automatic
+storage:
+  pathField: path
+  readOnly: true
+health:
+  type: http
+  path: /
+  intervalSeconds: 10
+  failureThreshold: 3
+config:
+  path:
+    type: directory
+    label: Site folder
+    description: The folder Spare will serve read-only.
+    required: true
+permissions:
+  filesystem:
+    read:
+      - path
+  network:
+    local: true
+    internet: false
+  startOnLogin: true
+  runInBackground: true
+

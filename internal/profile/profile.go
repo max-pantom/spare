@@ -15,6 +15,9 @@ import (
 func Collect(existing *model.Machine, storagePath string) (model.Machine, error) {
 	now := time.Now().UTC()
 	hostname, _ := os.Hostname()
+	lanAddresses := LANAddresses()
+	availableStorage := storageAvailable(storagePath)
+	hasBattery, hasExternalStorage := portableTraits()
 	id := ""
 	initializedAt := now
 	if existing != nil {
@@ -32,10 +35,18 @@ func Collect(existing *model.Machine, storagePath string) (model.Machine, error)
 		Architecture:          runtime.GOARCH,
 		LogicalCores:          runtime.NumCPU(),
 		MemoryTotalBytes:      totalMemory(),
-		StorageAvailableBytes: storageAvailable(storagePath),
-		LANAddresses:          LANAddresses(),
-		InitializedAt:         initializedAt,
-		LastProfiledAt:        now,
+		StorageAvailableBytes: availableStorage,
+		LANAddresses:          lanAddresses,
+		Capabilities: model.Capabilities{
+			CanServeLAN:        len(lanAddresses) > 0,
+			CanRunPersistent:   true,
+			CanStoreLargeFiles: availableStorage >= 10*1024*1024*1024,
+			CanRunContainers:   runtime.GOOS == "linux",
+			HasBattery:         hasBattery,
+			HasExternalStorage: hasExternalStorage,
+		},
+		InitializedAt:  initializedAt,
+		LastProfiledAt: now,
 	}, nil
 }
 
@@ -74,6 +85,10 @@ func LANAddresses() []string {
 	}
 	sort.Strings(result)
 	return result
+}
+
+func StorageAvailable(path string) uint64 {
+	return storageAvailable(path)
 }
 
 func randomID() string {

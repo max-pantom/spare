@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -65,5 +66,28 @@ func TestStorePersistsMachineInstanceAndEvents(t *testing.T) {
 	}
 	if _, err := store.Instance(ctx, model.RecipeSite); !IsNotFound(err) {
 		t.Fatalf("expected not found, got %v", err)
+	}
+}
+
+func TestMigrationRecordsCurrentSchemaVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	database, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	var version string
+	if err := database.QueryRow(`SELECT value FROM metadata WHERE key = 'schema_version'`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != "2" {
+		t.Fatalf("schema version = %q", version)
 	}
 }

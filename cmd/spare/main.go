@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -19,9 +20,14 @@ import (
 
 	"github.com/spare-run/spare/internal/api"
 	"github.com/spare-run/spare/internal/auth"
+	"github.com/spare-run/spare/internal/backup"
+	"github.com/spare-run/spare/internal/doctor"
 	"github.com/spare-run/spare/internal/model"
 	"github.com/spare-run/spare/internal/paths"
+	"github.com/spare-run/spare/internal/permissions"
 	"github.com/spare-run/spare/internal/profile"
+	"github.com/spare-run/spare/internal/recipe"
+	"github.com/spare-run/spare/internal/recipes"
 	"github.com/spare-run/spare/internal/service"
 	"github.com/spare-run/spare/internal/state"
 	"github.com/spf13/cobra"
@@ -59,6 +65,7 @@ func (a *app) rootCommand() *cobra.Command {
 	}
 	command.AddCommand(
 		a.initCommand(),
+		a.recipeCommand(),
 		a.tryCommand(),
 		a.installCommand(),
 		a.statusCommand(),
@@ -68,6 +75,8 @@ func (a *app) rootCommand() *cobra.Command {
 		a.logsCommand(),
 		a.doctorCommand(),
 		a.removeCommand(),
+		a.exportCommand(),
+		a.importCommand(),
 		a.uninstallCommand(),
 	)
 	return command
@@ -117,7 +126,7 @@ func (a *app) initCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(a.out, "Spare is ready.\n\nMachine\n%s\n\nSystem\n%s/%s\n%d CPU cores\n%s memory\n\nTry Site\nspare try site ./public\n",
+			fmt.Fprintf(a.out, "Spare is ready.\n\nMachine\n%s\n\nSystem\n%s/%s\n%d CPU cores\n%s memory\n\nTry a recipe\nspare try site ./public\nspare try drop ./received-files\nspare try hook\n",
 				initialized.Hostname,
 				initialized.OS,
 				initialized.Architecture,
@@ -129,15 +138,116 @@ func (a *app) initCommand() *cobra.Command {
 	}
 }
 
-func (a *app) tryCommand() *cobra.Command {
-	var portValue string
+func (a *app) recipeCommand() *cobra.Command {
 	command := &cobra.Command{
-		Use:   "try site <directory>",
-		Short: "Run Site until this terminal closes",
-		Args:  cobra.ExactArgs(2),
+		Use:   "recipe",
+		Short: "Inspect and package recipes",
+	}
+	command.AddCommand(
+		&cobra.Command{
+			Use:   "list",
+			Short: "List built-in recipes",
+			Args:  cobra.NoArgs,
+			RunE: func(command *cobra.Command, args []string) error {
+				registry, err := recipes.Builtins()
+				if err != nil {
+					return err
+				}
+				var machine model.Machine
+				if client, discoverErr := api.Discover(a.paths); discoverErr == nil {
+					machine, _ = client.Machine(command.Context())
+				} else {
+					machine, _ = profile.Collect(nil, ".")
+				}
+				for _, available := range registry.Models(machine) {
+					fmt.Fprintf(a.out, "%s\t%s\t%s\n", available.ID, available.Title, available.Compatibility.Rating)
+				}
+				return nil
+			},
+		},
+		&cobra.Command{
+			Use:   "validate <directory|manifest|package.sp>",
+			Short: "Validate a recipe manifest or package",
+			Args:  cobra.ExactArgs(1),
+			RunE: func(command *cobra.Command, args []string) error {
+				manifest, err := recipe.Load(args[0])
+				if err != nil {
+					return err
+				}
+				compatibility := recipe.CurrentPlatformCompatible(manifest)
+				fmt.Fprintf(a.out, "%s %s is valid.\nCompatibility: %s\n", manifest.Name, manifest.Version, compatibility.Rating)
+				return nil
+			},
+		},
+		a.recipePackCommand(),
+		&cobra.Command{
+			Use:   "inspect <directory|manifest|package.sp>",
+			Short: "Print a recipe manifest",
+			Args:  cobra.ExactArgs(1),
+			RunE: func(command *cobra.Command, args []string) error {
+				manifest, err := recipe.Load(args[0])
+				if err != nil {
+					return err
+				}
+				return writePrettyJSON(a.out, manifest)
+			},
+		},
+	)
+	return command
+}
+
+func (a *app) recipePackCommand() *cobra.Command {
+	var output string
+	command := &cobra.Command{
+		Use:   "pack <directory>",
+		Short: "Create a checksummable .sp recipe package",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
-			if args[0] != model.RecipeSite {
-				return errors.New("only the built-in Site recipe is available")
+			manifest, err := recipe.Load(args[0])
+			if err != nil {
+				return err
+			}
+			if output == "" {
+				output = manifest.ID + ".sp"
+			}
+			absolute, err := filepath.Abs(output)
+			if err != nil {
+				return err
+			}
+			manifest, err = recipe.Pack(args[0], absolute)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(a.out, "Created %s\nRecipe: %s %s\n", absolute, manifest.Name, manifest.Version)
+			return nil
+		},
+	}
+	command.Flags().StringVarP(&output, "output", "o", "", "output .sp path")
+	return command
+}
+
+func (a *app) tryCommand() *cobra.Command {
+	var pathValue string
+	var portValue string
+	var maximumFileSize string
+	command := &cobra.Command{
+		Use:   "try <recipe|package.sp> [directory]",
+		Short: "Run a recipe until this terminal closes",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(command *cobra.Command, args []string) error {
+			manifest, err := a.runnableManifest(args[0])
+			if err != nil {
+				return err
+			}
+			if len(args) == 2 {
+				if pathValue != "" {
+					return errors.New("choose the recipe folder with either the positional argument or `--path`, not both")
+				}
+				pathValue = args[1]
+			}
+			values, err := commandConfig(manifest, pathValue, maximumFileSize)
+			if err != nil {
+				return err
 			}
 			port, portMode, err := parsePort(portValue)
 			if err != nil {
@@ -147,11 +257,11 @@ func (a *app) tryCommand() *cobra.Command {
 			if err != nil {
 				return errors.New("Spare is not initialized. Run `spare init` first")
 			}
-			instance, err := client.Create(command.Context(), model.ModeTemporary, args[1], portMode, port)
+			current, err := client.Create(command.Context(), manifest.ID, model.ModeTemporary, values, portMode, port)
 			if err != nil {
 				return err
 			}
-			printInstance(a.out, "Site is running temporarily.", instance)
+			printInstance(a.out, manifest.Name+" is running temporarily.", manifest.Name, current)
 			fmt.Fprintln(a.out, "\nPress Ctrl-C to stop.")
 
 			ctx, stop := signal.NotifyContext(command.Context(), os.Interrupt, syscall.SIGTERM)
@@ -162,35 +272,40 @@ func (a *app) tryCommand() *cobra.Command {
 				select {
 				case <-ctx.Done():
 					cleanup, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-					defer cancel()
-					_ = client.Remove(cleanup, instance.ID)
-					fmt.Fprintln(a.out, "\nTemporary Site stopped.")
+					_ = client.Remove(cleanup, current.ID)
+					cancel()
+					fmt.Fprintf(a.out, "\nTemporary %s stopped.\n", manifest.Name)
 					return nil
 				case <-ticker.C:
-					if err := client.Heartbeat(ctx, instance.ID); err != nil {
+					if err := client.Heartbeat(ctx, current.ID); err != nil {
 						return err
 					}
 				}
 			}
 		},
 	}
-	command.Flags().StringVar(&portValue, "port", "auto", "site port: auto or 1-65535")
+	command.Flags().StringVar(&pathValue, "path", "", "selected folder")
+	command.Flags().StringVar(&portValue, "port", "auto", "recipe port: auto or 1-65535")
+	command.Flags().StringVar(&maximumFileSize, "max-file-size", "", "Drop maximum file size, such as 2GB")
 	return command
 }
 
 func (a *app) installCommand() *cobra.Command {
-	var root string
+	var pathValue string
 	var portValue string
+	var maximumFileSize string
 	command := &cobra.Command{
-		Use:   "install site",
-		Short: "Keep Site running after login",
+		Use:   "install <recipe|package.sp>",
+		Short: "Keep a recipe running after login",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
-			if args[0] != model.RecipeSite {
-				return errors.New("only the built-in Site recipe is available")
+			manifest, err := a.runnableManifest(args[0])
+			if err != nil {
+				return err
 			}
-			if root == "" {
-				return errors.New("choose a folder with `--path <directory>`")
+			values, err := commandConfig(manifest, pathValue, maximumFileSize)
+			if err != nil {
+				return err
 			}
 			port, portMode, err := parsePort(portValue)
 			if err != nil {
@@ -200,17 +315,19 @@ func (a *app) installCommand() *cobra.Command {
 			if err != nil {
 				return errors.New("Spare is not initialized. Run `spare init` first")
 			}
-			instance, err := client.Create(command.Context(), model.ModeInstalled, root, portMode, port)
+			current, err := client.Create(command.Context(), manifest.ID, model.ModeInstalled, values, portMode, port)
 			if err != nil {
 				return err
 			}
-			printInstance(a.out, "Site is installed.", instance)
+			printPermissions(a.out, manifest)
+			printInstance(a.out, manifest.Name+" is installed.", manifest.Name, current)
 			fmt.Fprintln(a.out, "\nIt will start automatically after you log in.")
 			return nil
 		},
 	}
-	command.Flags().StringVar(&root, "path", "", "folder to serve")
-	command.Flags().StringVar(&portValue, "port", "auto", "site port: auto or 1-65535")
+	command.Flags().StringVar(&pathValue, "path", "", "selected folder")
+	command.Flags().StringVar(&portValue, "port", "auto", "recipe port: auto or 1-65535")
+	command.Flags().StringVar(&maximumFileSize, "max-file-size", "", "Drop maximum file size, such as 2GB")
 	return command
 }
 
@@ -233,21 +350,36 @@ func (a *app) statusCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			available, err := client.Recipes(command.Context())
+			if err != nil {
+				return err
+			}
 			if asJSON {
-				return writePrettyJSON(a.out, map[string]any{"machine": machine, "instances": instances})
+				return writePrettyJSON(a.out, map[string]any{
+					"machine":   machine,
+					"recipes":   available,
+					"instances": instances,
+				})
 			}
 			fmt.Fprintf(a.out, "Spare\n\nMachine\n%s\n\n", machine.Hostname)
 			if len(instances) == 0 {
-				fmt.Fprintln(a.out, "This computer is ready.\n\nNo role installed.\n\nTry one with:\nspare try site ./public")
+				fmt.Fprintln(a.out, "This computer is ready.\n\nNo role installed.\n\nTry one with:\nspare try site ./public\nspare try drop ./received-files\nspare try hook")
 				return nil
 			}
-			instance := instances[0]
-			fmt.Fprintf(a.out, "This computer is a Site.\n\nStatus\n%s\n", sentenceCase(instance.Status))
-			for _, url := range instance.URLs {
+			current := instances[0]
+			title := titleForRecipe(available, current.RecipeID)
+			fmt.Fprintf(a.out, "This computer is a %s.\n\nStatus\n%s\n", title, sentenceCase(current.Status))
+			for _, url := range current.URLs {
 				fmt.Fprintln(a.out, url)
 			}
-			if instance.Problem != nil {
-				fmt.Fprintf(a.out, "\nNeeds attention\n%s\n%s\n", instance.Problem.Summary, instance.Problem.Recovery)
+			if current.ItemCount > 0 {
+				fmt.Fprintf(a.out, "\nFiles\n%d\n", current.ItemCount)
+			}
+			if current.StorageAvailableBytes > 0 {
+				fmt.Fprintf(a.out, "\nAvailable storage\n%s\n", formatBytes(current.StorageAvailableBytes))
+			}
+			if current.Problem != nil {
+				fmt.Fprintf(a.out, "\nNeeds attention\n%s\n%s\n", current.Problem.Summary, current.Problem.Recovery)
 			}
 			return nil
 		},
@@ -258,8 +390,8 @@ func (a *app) statusCommand() *cobra.Command {
 
 func (a *app) openCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "open [dashboard|site]",
-		Short: "Open Spare or the current Site",
+		Use:   "open [dashboard|recipe]",
+		Short: "Open Spare or the current recipe",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
 			target := "dashboard"
@@ -271,20 +403,20 @@ func (a *app) openCommand() *cobra.Command {
 				return err
 			}
 			var url string
-			switch target {
-			case "dashboard":
+			if target == "dashboard" {
 				url, err = client.BrowserSession(command.Context())
-			case "site":
+			} else {
 				var instances []model.Instance
 				instances, err = client.Instances(command.Context())
 				if err == nil {
 					if len(instances) == 0 {
-						return errors.New("Site is not installed")
+						return errors.New("no recipe is installed")
+					}
+					if target != "recipe" && target != instances[0].RecipeID {
+						return fmt.Errorf("%s is not installed", target)
 					}
 					url = instances[0].URLs[0]
 				}
-			default:
-				return errors.New("choose `dashboard` or `site`")
 			}
 			if err != nil {
 				return err
@@ -297,22 +429,19 @@ func (a *app) openCommand() *cobra.Command {
 
 func (a *app) actionCommand(action string) *cobra.Command {
 	return &cobra.Command{
-		Use:   action + " site",
-		Short: sentenceCase(action) + " the installed Site",
+		Use:   action + " <recipe>",
+		Short: sentenceCase(action) + " the installed recipe",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
-			if args[0] != model.RecipeSite {
-				return fmt.Errorf("only Site can be %s", actionVerb(action))
-			}
 			client, err := api.Discover(a.paths)
 			if err != nil {
 				return err
 			}
-			instance, err := client.InstanceAction(command.Context(), model.RecipeSite, action)
+			current, err := client.InstanceAction(command.Context(), args[0], action)
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(a.out, "Site is %s.\n", instance.Status)
+			fmt.Fprintf(a.out, "%s is %s.\n", sentenceCase(current.RecipeID), current.Status)
 			return nil
 		},
 	}
@@ -321,18 +450,19 @@ func (a *app) actionCommand(action string) *cobra.Command {
 func (a *app) logsCommand() *cobra.Command {
 	var follow bool
 	command := &cobra.Command{
-		Use:   "logs site",
-		Short: "Read Site logs",
+		Use:   "logs <recipe>",
+		Short: "Read recipe logs",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
-			if args[0] != model.RecipeSite {
-				return errors.New("only Site logs are available")
+			manifest, err := a.runnableManifest(args[0])
+			if err != nil {
+				return err
 			}
-			path := filepath.Join(a.paths.Logs, model.RecipeSite+".log")
+			path := filepath.Join(a.paths.Logs, manifest.ID+".log")
 			if !follow {
 				data, err := os.ReadFile(path)
 				if errors.Is(err, os.ErrNotExist) {
-					return errors.New("Site has not written any logs yet")
+					return errors.New("this recipe has not written any logs yet")
 				}
 				if err != nil {
 					return err
@@ -354,42 +484,20 @@ func (a *app) doctorCommand() *cobra.Command {
 		Short: "Check Spare and explain problems",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
-			type check struct {
-				Name    string `json:"name"`
-				Status  string `json:"status"`
-				Message string `json:"message"`
-			}
-			checks := []check{}
 			client, err := api.Discover(a.paths)
 			if err != nil {
-				checks = append(checks, check{Name: "Daemon", Status: "failed", Message: "Spare is not running. Run `spare init`."})
-			} else if err := client.Health(command.Context()); err != nil {
-				checks = append(checks, check{Name: "Daemon", Status: "failed", Message: err.Error()})
-			} else {
-				checks = append(checks, check{Name: "Daemon", Status: "healthy", Message: "The local management service is reachable."})
-				instances, readErr := client.Instances(command.Context())
-				if readErr != nil {
-					checks = append(checks, check{Name: "Site", Status: "failed", Message: readErr.Error()})
-				} else if len(instances) == 0 {
-					checks = append(checks, check{Name: "Site", Status: "ready", Message: "No Site is installed."})
-				} else {
-					instance := instances[0]
-					if _, statErr := os.Stat(instance.RootPath); statErr != nil {
-						checks = append(checks, check{Name: "Site folder", Status: "failed", Message: "The selected Site folder is unavailable."})
-					} else {
-						checks = append(checks, check{Name: "Site folder", Status: "healthy", Message: "The selected folder is readable."})
-					}
-					checks = append(checks, check{Name: "Site process", Status: instance.Status, Message: problemMessage(instance)})
+				report := doctor.Run(command.Context(), nil, a.paths)
+				if asJSON {
+					return writePrettyJSON(a.out, report)
 				}
+				printDoctor(a.out, report)
+				return nil
 			}
+			report := doctor.Run(command.Context(), client, a.paths)
 			if asJSON {
-				return writePrettyJSON(a.out, map[string]any{"checks": checks})
+				return writePrettyJSON(a.out, report)
 			}
-			fmt.Fprintln(a.out, "Checking Spare...")
-			fmt.Fprintln(a.out)
-			for _, item := range checks {
-				fmt.Fprintf(a.out, "%-16s %-10s %s\n", item.Name, item.Status, item.Message)
-			}
+			printDoctor(a.out, report)
 			return nil
 		},
 	}
@@ -400,20 +508,21 @@ func (a *app) doctorCommand() *cobra.Command {
 func (a *app) removeCommand() *cobra.Command {
 	var yes bool
 	command := &cobra.Command{
-		Use:   "remove site",
-		Short: "Remove Site without deleting its folder",
+		Use:   "remove <recipe>",
+		Short: "Remove a recipe without deleting its selected folder",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
-			if args[0] != model.RecipeSite {
-				return errors.New("only Site can be removed")
+			manifest, err := a.runnableManifest(args[0])
+			if err != nil {
+				return err
 			}
 			if !yes {
-				ok, err := confirm("Remove Site? The served folder will stay unchanged. [y/N] ")
+				ok, err := confirm("Remove " + manifest.Name + "? Its selected folder will stay unchanged. [y/N] ")
 				if err != nil {
 					return err
 				}
 				if !ok {
-					fmt.Fprintln(a.out, "Site was not removed.")
+					fmt.Fprintf(a.out, "%s was not removed.\n", manifest.Name)
 					return nil
 				}
 			}
@@ -421,14 +530,106 @@ func (a *app) removeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := client.Remove(command.Context(), model.RecipeSite); err != nil {
+			if err := client.Remove(command.Context(), manifest.ID); err != nil {
 				return err
 			}
-			fmt.Fprintln(a.out, "Site was removed. Its folder was left unchanged.")
+			fmt.Fprintf(a.out, "%s was removed. Its selected folder was left unchanged.\n", manifest.Name)
 			return nil
 		},
 	}
 	command.Flags().BoolVar(&yes, "yes", false, "skip confirmation")
+	return command
+}
+
+func (a *app) exportCommand() *cobra.Command {
+	var output string
+	command := &cobra.Command{
+		Use:   "export <recipe>",
+		Short: "Export recipe configuration and selected-folder data",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(command *cobra.Command, args []string) error {
+			client, err := api.Discover(a.paths)
+			if err != nil {
+				return err
+			}
+			current, err := client.Instance(command.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			if output == "" {
+				output = fmt.Sprintf("%s-%s.spare-backup", current.RecipeID, time.Now().Format("20060102-150405"))
+			}
+			absolute, err := filepath.Abs(output)
+			if err != nil {
+				return err
+			}
+			if err := backup.ExportInstance(current, absolute); err != nil {
+				return err
+			}
+			fmt.Fprintf(a.out, "Created %s\nThe selected folder was copied into this backup.\n", absolute)
+			return nil
+		},
+	}
+	command.Flags().StringVarP(&output, "output", "o", "", "backup output path")
+	return command
+}
+
+func (a *app) importCommand() *cobra.Command {
+	var destination string
+	var portValue string
+	command := &cobra.Command{
+		Use:   "import <backup.spare-backup>",
+		Short: "Restore recipe data and install its configuration",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(command *cobra.Command, args []string) error {
+			if destination == "" {
+				return errors.New("choose an empty destination with `--path <directory>`")
+			}
+			absoluteDestination, err := filepath.Abs(destination)
+			if err != nil {
+				return err
+			}
+			manifest, err := backup.Import(args[0], absoluteDestination)
+			if err != nil {
+				return err
+			}
+			registry, err := recipes.Builtins()
+			if err != nil {
+				return err
+			}
+			implementation, ok := registry.Get(manifest.RecipeID)
+			if !ok {
+				return fmt.Errorf("backup recipe %q is not built into this Spare release", manifest.RecipeID)
+			}
+			values := manifest.Config
+			if values == nil {
+				values = map[string]any{}
+			}
+			if pathField := implementation.Manifest().Storage.PathField; pathField != "" {
+				values[pathField] = absoluteDestination
+			}
+			port := manifest.Port
+			portMode := manifest.PortMode
+			if portValue != "" {
+				port, portMode, err = parsePort(portValue)
+				if err != nil {
+					return err
+				}
+			}
+			client, err := api.Discover(a.paths)
+			if err != nil {
+				return errors.New("backup data was restored, but Spare is not running. Run `spare init`, then install the restored folder")
+			}
+			current, err := client.Create(command.Context(), manifest.RecipeID, model.ModeInstalled, values, portMode, port)
+			if err != nil {
+				return fmt.Errorf("backup data was restored to %s, but the recipe was not installed: %w", absoluteDestination, err)
+			}
+			fmt.Fprintf(a.out, "Restored %s to %s.\n", sentenceCase(current.RecipeID), absoluteDestination)
+			return nil
+		},
+	}
+	command.Flags().StringVar(&destination, "path", "", "empty destination folder")
+	command.Flags().StringVar(&portValue, "port", "", "override the saved port with auto or 1-65535")
 	return command
 }
 
@@ -440,7 +641,7 @@ func (a *app) uninstallCommand() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			if !yes {
-				ok, err := confirm("Uninstall Spare? Site source folders will stay unchanged. [y/N] ")
+				ok, err := confirm("Uninstall Spare? Selected folders will stay unchanged. [y/N] ")
 				if err != nil {
 					return err
 				}
@@ -452,7 +653,11 @@ func (a *app) uninstallCommand() *cobra.Command {
 			var endpoint paths.Endpoint
 			if client, err := api.Discover(a.paths); err == nil {
 				endpoint, _ = a.paths.ReadEndpoint()
-				_ = client.Remove(command.Context(), model.RecipeSite)
+				if instances, listErr := client.Instances(command.Context()); listErr == nil {
+					for _, current := range instances {
+						_ = client.Remove(command.Context(), current.ID)
+					}
+				}
 			}
 			if err := service.Uninstall(command.Context(), a.paths.Root); err != nil {
 				return err
@@ -466,7 +671,7 @@ func (a *app) uninstallCommand() *cobra.Command {
 			if err := os.RemoveAll(a.paths.Root); err != nil {
 				return err
 			}
-			fmt.Fprintln(a.out, "Spare was removed. Site source folders were left unchanged.")
+			fmt.Fprintln(a.out, "Spare was removed. Selected folders were left unchanged.")
 			return nil
 		},
 	}
@@ -474,13 +679,81 @@ func (a *app) uninstallCommand() *cobra.Command {
 	return command
 }
 
+func (a *app) runnableManifest(reference string) (recipe.Manifest, error) {
+	registry, err := recipes.Builtins()
+	if err != nil {
+		return recipe.Manifest{}, err
+	}
+	if implementation, ok := registry.Get(reference); ok {
+		return implementation.Manifest(), nil
+	}
+	manifest, err := recipe.Load(reference)
+	if err != nil {
+		return recipe.Manifest{}, fmt.Errorf("recipe %q is not built in and could not be loaded as a package: %w", reference, err)
+	}
+	implementation, ok := registry.Get(manifest.ID)
+	if !ok {
+		return recipe.Manifest{}, fmt.Errorf("%s is valid, but this preview runs only the built-in Site, Drop, and Hook recipes", manifest.Name)
+	}
+	if !reflect.DeepEqual(manifest, implementation.Manifest()) {
+		return recipe.Manifest{}, fmt.Errorf("%s is a valid package, but its manifest does not match the trusted built-in %s recipe", reference, manifest.Name)
+	}
+	compatibility := recipe.CurrentPlatformCompatible(manifest)
+	if !compatibility.Supported {
+		return recipe.Manifest{}, fmt.Errorf("%s is not compatible with this computer: %s", manifest.Name, strings.Join(compatibility.Reasons, " "))
+	}
+	return manifest, nil
+}
+
+func commandConfig(manifest recipe.Manifest, selectedPath, maximumFileSize string) (map[string]any, error) {
+	values := map[string]any{}
+	if manifest.Storage.PathField != "" {
+		if selectedPath == "" {
+			return nil, fmt.Errorf("choose %s with `--path <directory>`", strings.ToLower(manifest.Config[manifest.Storage.PathField].Label))
+		}
+		values[manifest.Storage.PathField] = selectedPath
+	}
+	if manifest.ID == model.RecipeDrop && maximumFileSize != "" {
+		values["max-file-size"] = maximumFileSize
+	}
+	return values, nil
+}
+
+func printPermissions(output io.Writer, manifest recipe.Manifest) {
+	statements := permissions.Describe(manifest.Permissions)
+	fmt.Fprintf(output, "%s can:\n", manifest.Name)
+	for _, statement := range statements {
+		if statement.Granted {
+			fmt.Fprintf(output, "  %s\n", statement.Description)
+		}
+	}
+	fmt.Fprintf(output, "\n%s cannot:\n", manifest.Name)
+	for _, statement := range statements {
+		if !statement.Granted {
+			fmt.Fprintf(output, "  %s\n", statement.Description)
+		}
+	}
+	fmt.Fprintln(output)
+}
+
+func printDoctor(output io.Writer, report doctor.Report) {
+	fmt.Fprintln(output, "Checking Spare...")
+	fmt.Fprintln(output)
+	for _, item := range report.Checks {
+		fmt.Fprintf(output, "%-20s %-10s %s\n", item.Name, item.Status, item.Message)
+		if item.Recovery != "" {
+			fmt.Fprintf(output, "%-32s%s\n", "", item.Recovery)
+		}
+	}
+}
+
 func (a *app) waitForDaemon(ctx context.Context, timeout time.Duration) (*api.Client, error) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		client, err := api.Discover(a.paths)
 		if err == nil {
-			checkCtx, cancel := context.WithTimeout(ctx, time.Second)
-			err = client.Health(checkCtx)
+			checkContext, cancel := context.WithTimeout(ctx, time.Second)
+			err = client.Health(checkContext)
 			cancel()
 			if err == nil {
 				return client, nil
@@ -524,13 +797,22 @@ func parsePort(value string) (int, string, error) {
 	return port, "fixed", nil
 }
 
-func printInstance(output io.Writer, heading string, instance model.Instance) {
+func printInstance(output io.Writer, heading, title string, instance model.Instance) {
 	fmt.Fprintln(output, heading)
 	fmt.Fprintln(output, "\nAvailable at")
 	for _, url := range instance.URLs {
 		fmt.Fprintln(output, url)
 	}
-	fmt.Fprintln(output, "\nNearby devices can open a LAN address while connected to the same network.")
+	fmt.Fprintf(output, "\nNearby devices can open a LAN address while connected to the same network.\n%s data stays in:\n%s\n", title, instance.DataPath)
+}
+
+func titleForRecipe(recipes []model.Recipe, id string) string {
+	for _, available := range recipes {
+		if available.ID == id {
+			return available.Title
+		}
+	}
+	return sentenceCase(id)
 }
 
 func openBrowser(url string) error {
@@ -600,13 +882,6 @@ func formatBytes(value uint64) string {
 	return fmt.Sprintf("%.0fMB", float64(value)/mib)
 }
 
-func problemMessage(instance model.Instance) string {
-	if instance.Problem != nil {
-		return instance.Problem.Summary + " " + instance.Problem.Recovery
-	}
-	return "Site is " + instance.Status + "."
-}
-
 func sentenceCase(value string) string {
 	if value == "" {
 		return value
@@ -614,20 +889,13 @@ func sentenceCase(value string) string {
 	return strings.ToUpper(value[:1]) + value[1:]
 }
 
-func actionVerb(action string) string {
-	if action == "stop" {
-		return "stopped"
-	}
-	return "started"
-}
-
 func formatError(err error) string {
 	var clientError *api.ClientError
 	if errors.As(err, &clientError) {
 		if clientError.API.Hint != "" {
-			return clientError.API.Message + "\n" + clientError.API.Hint
+			return fmt.Sprintf("Error [%s]: %s\nRecovery: %s", clientError.API.Code, clientError.API.Message, clientError.API.Hint)
 		}
-		return clientError.API.Message
+		return fmt.Sprintf("Error [%s]: %s", clientError.API.Code, clientError.API.Message)
 	}
 	return err.Error()
 }
