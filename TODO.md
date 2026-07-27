@@ -30,6 +30,32 @@ that remain deliberately outside the trusted built-in V1 boundary.
   views.
 - [x] Add SQLite schema version 2 and migration of legacy Site instance JSON.
 
+## Desktop Alpha
+
+- [x] Add the Wails shell without duplicating the React application.
+- [x] Share initialization and daemon recovery between the CLI and desktop.
+- [x] Keep daemon authentication in Go instead of browser storage.
+- [x] Add manifest-driven visual recipe setup and a native folder picker.
+- [x] Make the desktop process own temporary recipe heartbeats and promotion.
+- [x] Add live activity streaming and structured Drop receipt events.
+- [x] Add QR sharing, native notifications, and macOS menu-bar controls.
+- [x] Add separate menu-bar, desktop-login, and recipe-restore preferences.
+- [x] Add settings, repair, safe removal, and uninstall entry points.
+- [x] Build a single macOS ARM64 bundle containing the GUI, CLI, daemon,
+  built-in recipes, and uninstaller.
+- [x] Add native package/backup pickers, drag-and-drop routing, active recipe
+  reconfiguration, and per-recipe notification preferences.
+- [x] Cross-build the Windows amd64 Wails shell, Win32 system tray, per-user
+  installer, and uninstaller as one checksummed archive.
+- [x] Add the native Linux GTK/AppIndicator tray, per-user installer, and
+  amd64/arm64 packaging path.
+- [ ] Complete a hands-on Apple Silicon install, notification, menu-bar, login
+  restart, and uninstall acceptance pass before publishing the Desktop Alpha.
+- [ ] Validate the Windows amd64 archive, tray, WebView2 shell, login restart,
+  and uninstall on Windows 11.
+- [ ] Build and validate Linux desktop archives on Ubuntu 22.04+, Debian 12+,
+  and ARM64 Linux after installing the native WebKitGTK/AppIndicator toolchain.
+
 ## Before the `0.1.0` tag
 
 - [ ] Run the complete install, login, Site, Drop, Hook, export, removal, and
@@ -62,7 +88,7 @@ that remain deliberately outside the trusted built-in V1 boundary.
 
 - [ ] Recover cleanly from a corrupt or partially written SQLite database.
 - [ ] Add integration coverage for LAN changes while a recipe is running.
-- [ ] Record Drop transfers as structured daemon activity without weakening the
+- [x] Record Drop transfers as structured daemon activity without weakening the
   worker boundary.
 - [ ] Add clearer guidance when the operating-system firewall blocks LAN
   access.

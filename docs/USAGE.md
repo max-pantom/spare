@@ -85,10 +85,10 @@ spare uninstall
 | --- | --- |
 | `spare init` | Profile the computer, initialize state, register the login service, and start the daemon |
 | `spare recipe list` | List built-in recipes and compatibility ratings |
-| `spare recipe validate <source>` | Validate a recipe directory, manifest, or `.sp` package |
+| `spare recipe validate <recipe-or-source>` | Validate a built-in ID, recipe directory, manifest, or `.sp` package |
 | `spare recipe pack <directory>` | Create a reproducible ZIP-compatible `.sp` package |
-| `spare recipe inspect <source>` | Print a validated manifest as JSON |
-| `spare view <package.sp>` | Open a validated package summary, file list, and safe previews in a local browser |
+| `spare recipe inspect <recipe-or-source>` | Print a built-in or validated manifest as JSON |
+| `spare view <recipe-or-package.sp>` | Open a bundled default or validated package summary, file list, and safe previews in a local browser |
 | `spare try <recipe> [directory]` | Run a recipe while the CLI heartbeat remains active |
 | `spare install <recipe> --path <directory>` | Install one persistent recipe instance |
 | `spare status [--json]` | Show machine, recipe, instance, addresses, metrics, and problems |

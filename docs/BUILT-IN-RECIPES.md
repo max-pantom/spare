@@ -23,6 +23,34 @@ List the recipes and their compatibility with this computer:
 spare recipe list
 ```
 
+Built-in recipe names are IDs, not paths. You can validate, inspect, or view
+the defaults directly without finding their package files:
+
+```bash
+spare recipe validate site
+spare recipe inspect drop
+spare view hook
+```
+
+`validate` checks the trusted manifest and, when the bundled package is
+available, confirms that it matches. `inspect` prints the manifest as JSON.
+`view` locates the bundled `.sp` package and opens its safe local viewer.
+
+The physical packages are included for inspection and distribution:
+
+| Installation | Default package directory |
+| --- | --- |
+| macOS Desktop | `~/Applications/Spare.app/Contents/Resources/recipes` |
+| macOS CLI | `~/Library/Application Support/Spare/recipes` |
+| Windows Desktop | `%LOCALAPPDATA%\Programs\Spare\recipes` |
+| Windows CLI | `%LOCALAPPDATA%\Spare\recipes` |
+| Linux Desktop | `~/.local/lib/spare/recipes` |
+| Linux CLI | `~/.local/state/spare/recipes` |
+| Source checkout | `dist/recipes` after `make recipes` |
+
+You do not need these paths to run a default recipe. Use its ID with commands
+such as `spare try hook` or `spare install site --path ./public`.
+
 Choose how long the recipe should run:
 
 - `spare try` runs it temporarily. Keep the terminal open and press `Ctrl-C`

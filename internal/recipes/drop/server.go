@@ -44,10 +44,15 @@ func newServer(root string, maximumFileSize int64) (*server, error) {
 func (s *server) serve(port, healthPort int) error {
 	healthServer, err := health.Start(healthPort, func() health.Snapshot {
 		files, _ := listFiles(s.root)
+		latest := ""
+		if len(files) > 0 {
+			latest = files[0].Name
+		}
 		return health.Snapshot{
 			Status:                "healthy",
 			StorageAvailableBytes: availableStorage(s.root),
 			ItemCount:             len(files),
+			LatestItem:            latest,
 		}
 	})
 	if err != nil {

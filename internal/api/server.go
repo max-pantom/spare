@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spare-run/spare/internal/model"
 	"github.com/spare-run/spare/internal/state"
@@ -68,7 +69,7 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 			writeAPIError(response, http.StatusForbidden, "invalid_origin", "This request did not come from the Spare dashboard.", "Open the dashboard with `spare open dashboard`.")
 			return
 		}
-		s.serveAPI(response, request)
+		s.serveAPI(response, request, authKind)
 		return
 	}
 	if !s.validSession(request) {
@@ -118,8 +119,16 @@ func (s *Server) exchange(response http.ResponseWriter, request *http.Request) {
 	http.Redirect(response, request, "/", http.StatusSeeOther)
 }
 
-func (s *Server) serveAPI(response http.ResponseWriter, request *http.Request) {
+func (s *Server) serveAPI(response http.ResponseWriter, request *http.Request, authKind string) {
 	path := strings.TrimPrefix(request.URL.Path, "/api/v1")
+	if strings.HasPrefix(path, "/desktop/") && authKind != "bearer" {
+		writeAPIError(response, http.StatusForbidden, "desktop_only", "This operation is available only in Spare Desktop.", "Open Spare on the computer itself.")
+		return
+	}
+	if authKind != "bearer" && requiresLocalBearer(path, request.Method) {
+		writeAPIError(response, http.StatusForbidden, "local_user_required", "This operation must be approved on the Spare computer.", "Use Spare Desktop or the local `spare` CLI.")
+		return
+	}
 	switch {
 	case path == "/health" && request.Method == http.MethodGet:
 		writeJSON(response, http.StatusOK, map[string]string{"status": "healthy"})
@@ -144,6 +153,14 @@ func (s *Server) serveAPI(response http.ResponseWriter, request *http.Request) {
 			return
 		}
 		writeJSON(response, http.StatusOK, events)
+	case path == "/activity/stream" && request.Method == http.MethodGet:
+		s.streamActivity(response, request)
+	case path == "/desktop/backups/export" && request.Method == http.MethodPost:
+		s.exportBackup(response, request)
+	case path == "/desktop/backups/restore" && request.Method == http.MethodPost:
+		s.restoreBackup(response, request)
+	case path == "/desktop/drop-files" && request.Method == http.MethodPost:
+		s.addDropFiles(response, request)
 	case path == "/browser-sessions" && request.Method == http.MethodPost:
 		code := s.sessions.NewCode()
 		url := fmt.Sprintf("http://%s/auth/exchange?code=%s", request.Host, code)
@@ -153,6 +170,91 @@ func (s *Server) serveAPI(response http.ResponseWriter, request *http.Request) {
 	default:
 		writeAPIError(response, http.StatusNotFound, "endpoint_not_found", "The requested API endpoint does not exist.", "")
 	}
+}
+
+func requiresLocalBearer(path, method string) bool {
+	if path == "/instances" && method == http.MethodPost {
+		return true
+	}
+	if !strings.HasPrefix(path, "/instances/") {
+		return false
+	}
+	if method == http.MethodDelete {
+		return true
+	}
+	return method == http.MethodPost &&
+		(strings.HasSuffix(path, "/configure") ||
+			strings.HasSuffix(path, "/heartbeat") ||
+			strings.HasSuffix(path, "/promote"))
+}
+
+func (s *Server) exportBackup(response http.ResponseWriter, request *http.Request) {
+	var input struct {
+		InstanceID  string `json:"instanceId"`
+		Destination string `json:"destination"`
+	}
+	if !decodeDesktopRequest(response, request, &input) {
+		return
+	}
+	if input.InstanceID == "" || input.Destination == "" {
+		writeAPIError(response, http.StatusBadRequest, "invalid_request", "Choose a recipe and backup destination.", "Use the desktop backup picker and try again.")
+		return
+	}
+	if err := s.manager.ExportBackup(input.InstanceID, input.Destination); err != nil {
+		writeManagerError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, map[string]string{"destination": input.Destination})
+}
+
+func (s *Server) restoreBackup(response http.ResponseWriter, request *http.Request) {
+	var input struct {
+		Source      string `json:"source"`
+		Destination string `json:"destination"`
+	}
+	if !decodeDesktopRequest(response, request, &input) {
+		return
+	}
+	if input.Source == "" || input.Destination == "" {
+		writeAPIError(response, http.StatusBadRequest, "invalid_request", "Choose a backup and an empty destination folder.", "Use both desktop pickers and try again.")
+		return
+	}
+	instance, err := s.manager.RestoreBackup(input.Source, input.Destination)
+	if err != nil {
+		writeManagerError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, instance)
+}
+
+func (s *Server) addDropFiles(response http.ResponseWriter, request *http.Request) {
+	var input struct {
+		InstanceID string   `json:"instanceId"`
+		Paths      []string `json:"paths"`
+	}
+	if !decodeDesktopRequest(response, request, &input) {
+		return
+	}
+	names, err := s.manager.AddDropFiles(input.InstanceID, input.Paths)
+	if err != nil {
+		writeManagerError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, map[string]any{"names": names})
+}
+
+func decodeDesktopRequest(response http.ResponseWriter, request *http.Request, output any) bool {
+	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 128*1024))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(output); err != nil {
+		writeAPIError(response, http.StatusBadRequest, "invalid_request", "The desktop request is invalid.", err.Error())
+		return false
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeAPIError(response, http.StatusBadRequest, "invalid_request", "The desktop request is invalid.", "Send exactly one JSON object.")
+		return false
+	}
+	return true
 }
 
 func (s *Server) createInstance(response http.ResponseWriter, request *http.Request) {
@@ -222,12 +324,25 @@ func (s *Server) instanceAction(response http.ResponseWriter, request *http.Requ
 		instance, err = s.manager.Start(id)
 	case "stop":
 		instance, err = s.manager.Stop(id)
+	case "configure":
+		var input createInstanceRequest
+		if !decodeDesktopRequest(response, request, &input) {
+			return
+		}
+		instance, err = s.manager.Configure(id, supervisor.CreateRequest{
+			RecipeID: input.RecipeID,
+			Config:   input.Config,
+			Port:     input.Port,
+			PortMode: input.PortMode,
+		})
 	case "heartbeat":
 		err = s.manager.Heartbeat(id)
 		if err == nil {
 			response.WriteHeader(http.StatusNoContent)
 			return
 		}
+	case "promote":
+		instance, err = s.manager.Promote(id)
 	default:
 		writeAPIError(response, http.StatusNotFound, "endpoint_not_found", "The requested API endpoint does not exist.", "")
 		return
@@ -237,6 +352,43 @@ func (s *Server) instanceAction(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	writeJSON(response, http.StatusOK, instance)
+}
+
+func (s *Server) streamActivity(response http.ResponseWriter, request *http.Request) {
+	flusher, ok := response.(http.Flusher)
+	if !ok {
+		writeAPIError(response, http.StatusNotImplemented, "streaming_unavailable", "Live activity is unavailable.", "Refresh the activity view.")
+		return
+	}
+	response.Header().Set("Content-Type", "text/event-stream")
+	response.Header().Set("Cache-Control", "no-cache")
+	response.Header().Set("Connection", "keep-alive")
+	response.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(response, ": connected\n\n")
+	flusher.Flush()
+
+	events := s.store.SubscribeEvents(request.Context())
+	keepAlive := time.NewTicker(15 * time.Second)
+	defer keepAlive.Stop()
+	for {
+		select {
+		case <-request.Context().Done():
+			return
+		case event, open := <-events:
+			if !open {
+				return
+			}
+			data, err := json.Marshal(event)
+			if err != nil {
+				continue
+			}
+			_, _ = fmt.Fprintf(response, "event: activity\ndata: %s\n\n", data)
+			flusher.Flush()
+		case <-keepAlive.C:
+			_, _ = io.WriteString(response, ": keep-alive\n\n")
+			flusher.Flush()
+		}
+	}
 }
 
 func (s *Server) serveDashboard(response http.ResponseWriter, request *http.Request) {

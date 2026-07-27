@@ -1,11 +1,12 @@
 # Architecture
 
-Spare `0.1.0` is a Go monorepo with two executables, a generic recipe worker
-path, SQLite state, and an embedded React dashboard.
+Spare `0.1.0` is a Go monorepo with CLI, daemon, and Wails desktop executables,
+a generic recipe worker path, SQLite state, and one shared React application.
 
 ```text
-spare CLI ─────────┐
-                   ├── loopback JSON API ── spared
+Spare Desktop ─────┐
+macOS menu bar ────┤
+spare CLI ─────────┼── loopback JSON API ── spared
 browser dashboard ─┘                         │
                                              ├── recipe registry
                                              ├── instance state
@@ -37,6 +38,16 @@ data.
 `spared` is the per-user daemon. It owns state, API/dashboard access, the recipe
 registry, runtime drivers, supervision, health checks, and local discovery.
 
+`spare-desktop` is the Wails shell and primary local control surface. Its Go
+bridge performs automatic initialization, daemon recovery, authenticated API
+calls, native folder selection, notifications, window control, menu-bar
+actions, launch preferences, and uninstall. It does not own recipe lifecycle
+state.
+
+The React build detects its surface. Shared models and recipe controls remain
+in one application, while the desktop frame exposes native actions and the
+browser frame retains cookie sessions and remote-safe controls.
+
 Child mode is generic:
 
 ```text
@@ -56,6 +67,7 @@ a Site-specific worker command.
 | `internal/backup` | Export and safely restore instance configuration and selected-folder data |
 | `internal/config` | Resolve typed string, directory, size, Boolean, and integer fields |
 | `internal/dashboard` | Embed the Vite production build into `spared` |
+| `internal/desktop` | Bound the Wails bridge, native dialogs, menu bar, notifications, preferences, and uninstall |
 | `internal/discovery` | Advertise active recipes through best-effort mDNS |
 | `internal/doctor` | Diagnose daemon, dashboard, service, recipe, port, folder, storage, LAN, and sleep state |
 | `internal/health` | Serve and check shared worker health snapshots and metrics |
@@ -64,6 +76,7 @@ a Site-specific worker command.
 | `internal/model` | Stable machine, recipe, instance, event, compatibility, and problem API types |
 | `internal/network` | Allocate ports, discover LAN addresses, build endpoints, and normalize local hostnames |
 | `internal/paths` | Resolve per-user state locations |
+| `internal/preferences` | Persist launch preferences shared by desktop and daemon |
 | `internal/permissions` | Describe declared filesystem, network, startup, and background access |
 | `internal/profile` | Collect identity, CPU, memory, storage, LAN addresses, and capability signals |
 | `internal/recipe` | Parse, validate, inspect, pack, compare, and register recipe manifests |
@@ -117,8 +130,10 @@ The daemon checks workers every 10 seconds and restarts after three failed
 checks. Restart delays use capped exponential backoff. Five crashes within five
 minutes leave the instance failed until a manual start.
 
-Temporary instances also require a CLI heartbeat. They stop on Ctrl-C or within
-15 seconds after the heartbeat disappears.
+Temporary instances require a lease heartbeat. The CLI owns it for `spare try`;
+Spare Desktop owns it for visual temporary mode. They stop on Ctrl-C, an
+explicit desktop quit choice, or within 15 seconds after the lease owner
+disappears. A temporary instance can be promoted in place to installed mode.
 
 ## Package boundary
 

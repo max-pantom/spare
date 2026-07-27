@@ -60,6 +60,20 @@ func TestCaptureListAndInspectRequest(t *testing.T) {
 	}
 }
 
+func TestHookHealthSummaryNamesLatestRequest(t *testing.T) {
+	hook := newServer()
+	request := httptest.NewRequest(http.MethodPost, "/hook/stripe", strings.NewReader(`{"ok":true}`))
+	response := httptest.NewRecorder()
+	hook.routes().ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("capture status = %d", response.Code)
+	}
+	count, latest := hook.healthSummary()
+	if count != 1 || latest != "POST /hook/stripe" {
+		t.Fatalf("health summary = %d %q", count, latest)
+	}
+}
+
 func TestCaptureRejectsOversizedBodiesAndCapsHistory(t *testing.T) {
 	hook := newServer()
 	handler := hook.routes()

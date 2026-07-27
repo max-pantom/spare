@@ -13,6 +13,7 @@ type Snapshot struct {
 	Status                string `json:"status"`
 	StorageAvailableBytes uint64 `json:"storageAvailableBytes,omitempty"`
 	ItemCount             int    `json:"itemCount,omitempty"`
+	LatestItem            string `json:"latestItem,omitempty"`
 }
 
 type Provider func() Snapshot

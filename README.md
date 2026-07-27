@@ -13,6 +13,14 @@ Three built-in recipes prove the shared runtime:
   download links.
 - **Hook** receives, inspects, and replays webhook requests.
 
+The **Desktop Alpha** adds the primary local Wails interface:
+automatic initialization, visual Drop setup, native folder selection, QR
+sharing, live activity, menu-bar/system-tray controls, notifications,
+drag-and-drop, backup/restore, settings, repair, and uninstall. macOS Intel is
+natively exercised, macOS ARM64 and Windows amd64 are cross-built, and Linux
+has a native build path pending clean-machine acceptance. The browser
+dashboard remains the remote and headless surface.
+
 Start with the [documentation index](docs/README.md) for installation, testing,
 usage, repository structure, architecture, security, the project TODO, and the
 original product notes.
@@ -37,6 +45,13 @@ Requirements: Go 1.25.12, Node.js 24, npm, and `make`.
 
 ```bash
 make build
+make desktop
+make desktop-package VERSION=0.1.0       # Current Mac architecture
+make desktop-package-amd64 VERSION=0.1.0 # Intel Mac
+make desktop-package-arm64 VERSION=0.1.0 # Apple Silicon
+make desktop-windows-package VERSION=0.1.0
+# On Linux:
+make desktop-linux-package VERSION=0.1.0
 ```
 
 The binaries are written to `bin/spare` and `bin/spared`.
@@ -93,6 +108,10 @@ spare view drop.sp
 spare recipe validate ./recipes/hook
 ```
 
+Release archives include the Site, Drop, and Hook `.sp` packages in a
+`recipes` directory. The installer keeps them in Spare's per-user state
+directory so they remain available for inspection and sharing.
+
 ## Security boundary
 
 - The dashboard and JSON API bind only to `127.0.0.1`, on the first available port from `7331–7339`.
@@ -121,11 +140,17 @@ GET    /api/v1/recipes
 GET    /api/v1/instances
 GET    /api/v1/instances/{id}
 GET    /api/v1/events
+GET    /api/v1/activity/stream
 POST   /api/v1/instances
 POST   /api/v1/instances/{id}/start
 POST   /api/v1/instances/{id}/stop
 POST   /api/v1/instances/{id}/heartbeat
+POST   /api/v1/instances/{id}/promote
+POST   /api/v1/instances/{id}/configure
 POST   /api/v1/browser-sessions
+POST   /api/v1/desktop/backups/export
+POST   /api/v1/desktop/backups/restore
+POST   /api/v1/desktop/drop-files
 DELETE /api/v1/instances/{id}
 ```
 
@@ -154,6 +179,11 @@ make release VERSION=0.1.0
 `make release` creates checksummed archives for macOS, Windows, and Linux on
 amd64 and arm64, plus the Site, Drop, and Hook `.sp` packages, under
 `dist/releases`.
+
+`make desktop-package` separately creates the macOS application for the
+current Mac architecture and its checksum under `dist/desktop`. Use the
+architecture-specific targets for Intel or Apple Silicon. Read
+[Use Spare Desktop](docs/DESKTOP.md) for its install and test flow.
 
 This preview parses, validates, inspects, and packs `.sp` files, but executes
 only the three trusted built-in implementations. It intentionally excludes

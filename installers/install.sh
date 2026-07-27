@@ -1,7 +1,12 @@
 #!/bin/sh
 set -eu
 
-VERSION=${SPARE_VERSION:-0.1.0}
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+bundled_version=
+if [ -f "$script_dir/VERSION" ]; then
+  IFS= read -r bundled_version < "$script_dir/VERSION"
+fi
+VERSION=${SPARE_VERSION:-${bundled_version:-0.1.0}}
 INSTALL_DIR=${SPARE_INSTALL_DIR:-"$HOME/.local/bin"}
 BASE_URL=${SPARE_RELEASE_BASE_URL:-"https://github.com/spare-run/spare/releases/download/v$VERSION"}
 
@@ -21,6 +26,15 @@ if [ "${1:-}" = "--uninstall" ]; then
     rm -rf "$viewer_app"
   fi
   rm -f "$INSTALL_DIR/spare" "$INSTALL_DIR/spared"
+  if [ "$(uname -s | tr '[:upper:]' '[:lower:]')" = "darwin" ]; then
+    installed_recipes="$HOME/Library/Application Support/Spare/recipes"
+  else
+    installed_recipes="${XDG_STATE_HOME:-"$HOME/.local/state"}/spare/recipes"
+  fi
+  rm -f "$installed_recipes/site_${VERSION}.sp"
+  rm -f "$installed_recipes/drop_${VERSION}.sp"
+  rm -f "$installed_recipes/hook_${VERSION}.sp"
+  rmdir "$installed_recipes" >/dev/null 2>&1 || true
   echo "Spare binaries were removed."
   exit 0
 fi
@@ -40,11 +54,11 @@ case "$machine" in
 esac
 
 mkdir -p "$INSTALL_DIR"
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 if [ -x "$script_dir/spare" ] && [ -x "$script_dir/spared" ]; then
   cp "$script_dir/spare" "$INSTALL_DIR/spare"
   cp "$script_dir/spared" "$INSTALL_DIR/spared"
+  recipe_source="$script_dir/recipes"
 else
   archive="spare_${VERSION}_${target_os}_${target_arch}.tar.gz"
   download_dir=$(mktemp -d)
@@ -64,9 +78,27 @@ else
   tar -xzf "$download_dir/$archive" -C "$download_dir"
   cp "$download_dir/spare" "$INSTALL_DIR/spare"
   cp "$download_dir/spared" "$INSTALL_DIR/spared"
+  recipe_source="$download_dir/recipes"
 fi
 
 chmod 755 "$INSTALL_DIR/spare" "$INSTALL_DIR/spared"
+
+if [ "$target_os" = "darwin" ]; then
+  recipe_dir="$HOME/Library/Application Support/Spare/recipes"
+else
+  state_home=${XDG_STATE_HOME:-"$HOME/.local/state"}
+  recipe_dir="$state_home/spare/recipes"
+fi
+mkdir -p "$recipe_dir"
+for recipe_id in site drop hook; do
+  recipe_package="$recipe_source/${recipe_id}_${VERSION}.sp"
+  if [ ! -f "$recipe_package" ]; then
+    echo "The release archive is missing $recipe_package." >&2
+    exit 1
+  fi
+  cp "$recipe_package" "$recipe_dir/${recipe_id}_${VERSION}.sp"
+done
+echo "Installed the default recipe packages in $recipe_dir."
 
 if [ "$target_os" = "linux" ]; then
   data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}

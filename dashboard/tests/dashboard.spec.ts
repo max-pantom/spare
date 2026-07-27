@@ -35,7 +35,23 @@ const recipes = [
       memoryMaximumBytes: 536870912,
       cpuMaximum: 1
     },
-    config: [],
+    config: [
+      {
+        id: "destination",
+        type: "directory",
+        label: "Destination folder",
+        description: "Files received through Drop are written here.",
+        required: true
+      },
+      {
+        id: "max-file-size",
+        type: "size",
+        label: "Maximum file size",
+        description: "Drop rejects individual files larger than this limit.",
+        required: false,
+        default: "2GB"
+      }
+    ],
     permissions: [
       {
         id: "network.local",
@@ -67,7 +83,15 @@ const recipes = [
       memoryMaximumBytes: 268435456,
       cpuMaximum: 1
     },
-    config: [],
+    config: [
+      {
+        id: "path",
+        type: "directory",
+        label: "Site folder",
+        description: "The folder Spare will serve read-only.",
+        required: true
+      }
+    ],
     permissions: [
       {
         id: "filesystem.read",
@@ -209,7 +233,7 @@ test("shows reusable instance, recipe, machine, and activity views", async ({
   await page.goto("/");
 
   await expect(
-    page.getByRole("heading", { name: "This computer is a Site" })
+    page.getByRole("heading", { name: "studio-mac is a Site" })
   ).toBeVisible();
   await expect(page.getByRole("link", { name: /Open Site/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "Stop Site" })).toBeVisible();
@@ -236,7 +260,7 @@ test("shows Drop files and storage without Site-specific copy", async ({
   await page.goto("/");
 
   await expect(
-    page.getByRole("heading", { name: "This computer is a Drop" })
+    page.getByRole("heading", { name: "studio-mac is a Drop" })
   ).toBeVisible();
   await expect(page.getByText("Files received")).toBeVisible();
   await expect(page.getByText("7", { exact: true })).toBeVisible();
@@ -252,11 +276,13 @@ test("shows Hook request metrics without selected-folder details", async ({
   await page.goto("/");
 
   await expect(
-    page.getByRole("heading", { name: "This computer is a Hook" })
+    page.getByRole("heading", { name: "studio-mac is a Hook" })
   ).toBeVisible();
   await expect(page.getByText("Requests received")).toBeVisible();
   await expect(page.getByText("4", { exact: true })).toBeVisible();
-  await expect(page.getByText("Hook is ready to receive")).toBeVisible();
+  await expect(
+    page.getByText("Hook on studio-mac is ready to receive")
+  ).toBeVisible();
   await page.getByText("Show instance details").click();
   await expect(page.getByText("Folder", { exact: true })).toHaveCount(0);
 });
@@ -266,7 +292,7 @@ test("empty state points to all first recipe actions", async ({ page }) => {
   await page.goto("/");
 
   await expect(
-    page.getByRole("heading", { name: "This computer is ready" })
+    page.getByRole("heading", { name: "studio-mac is ready" })
   ).toBeVisible();
   const firstActions = page.getByLabel("Try a recipe");
   await expect(firstActions.getByText("spare try site ./public")).toBeVisible();
@@ -312,7 +338,7 @@ test("survives 200 percent text scaling", async ({ page }) => {
   });
 
   await expect(
-    page.getByRole("heading", { name: "This computer is a Site" })
+    page.getByRole("heading", { name: "studio-mac is a Site" })
   ).toBeVisible();
   await expect(page.getByRole("link", { name: /Open Site/ })).toBeVisible();
   const hasHorizontalOverflow = await page.evaluate(
@@ -321,4 +347,258 @@ test("survives 200 percent text scaling", async ({ page }) => {
       document.documentElement.clientWidth
   );
   expect(hasHorizontalOverflow).toBe(false);
+});
+
+test("desktop first launch sets up Drop without the CLI", async ({ page }) => {
+  await page.addInitScript(
+    ({ machine, recipes, healthyDrop }) => {
+      let instances: typeof healthyDrop[] = [];
+      const events: Array<Record<string, unknown>> = [];
+      const snapshot = () => ({
+        surface: "desktop",
+        machine,
+        recipes,
+        instances,
+        events,
+        preferences: {
+          notifications: true,
+          recipeNotifications: {
+            drop: true,
+            site: true,
+            hook: true
+          },
+          openAfterLogin: false,
+          showInMenuBar: true,
+          keepRecipesRunningAfterLogin: true
+        }
+      });
+      window.go = {
+        desktop: {
+          App: {
+            Bootstrap: async () => snapshot(),
+            Snapshot: async () => snapshot(),
+            CreateInstance: async (input) => {
+              const created = {
+                ...healthyDrop,
+                mode: input.mode,
+                rootPath: String(input.config.destination),
+                dataPath: String(input.config.destination),
+                config: input.config
+              };
+              instances = [created];
+              events.unshift({
+                id: 10,
+                instanceId: "drop",
+                level: "info",
+                kind: "instance_created",
+                message: "Drop started.",
+                createdAt: "2026-07-26T10:00:02Z"
+              });
+              return created;
+            },
+            ConfigureInstance: async (_id, input) => {
+              instances = [
+                {
+                  ...instances[0],
+                  rootPath: String(input.config.destination),
+                  dataPath: String(input.config.destination),
+                  config: input.config
+                }
+              ];
+              return instances[0];
+            },
+            StartInstance: async () => {
+              instances = [
+                {
+                  ...instances[0],
+                  status: "healthy",
+                  desiredState: "running"
+                }
+              ];
+              return instances[0];
+            },
+            StopInstance: async () => {
+              instances = [
+                {
+                  ...instances[0],
+                  status: "stopped",
+                  desiredState: "stopped"
+                }
+              ];
+              return instances[0];
+            },
+            PromoteInstance: async () => ({
+              ...instances[0],
+              mode: "installed"
+            }),
+            RemoveInstance: async () => {
+              instances = [];
+            },
+            Repair: async () => snapshot(),
+            SavePreferences: async () => undefined,
+            ChooseDirectory: async () => "/Users/max/Downloads/Spare",
+            ChooseFile: async () => "",
+            ChooseFiles: async () => ["/Users/max/Desktop/report.pdf"],
+            DescribeDroppedPaths: async () => [],
+            PendingLaunchPaths: async () => [],
+            OpenRecipePackage: async () => undefined,
+            AddDropFiles: async (_instanceId, paths) => {
+              instances = [
+                {
+                  ...instances[0],
+                  itemCount: instances[0].itemCount + paths.length
+                }
+              ];
+              events.unshift({
+                id: 11,
+                instanceId: "drop",
+                level: "info",
+                kind: "drop_file_received",
+                message: "report.pdf was received.",
+                details: { count: 1, itemName: "report.pdf" },
+                createdAt: "2026-07-26T10:00:03Z"
+              });
+              return ["report.pdf"];
+            },
+            ExportBackup: async () => "/Users/max/Desktop/drop.spare-backup",
+            RestoreBackup: async () => instances[0],
+            OpenURL: async () => undefined,
+            OpenDashboard: async () => undefined,
+            RevealPath: async () => undefined,
+            RevealReceivedFile: async () => undefined,
+            Uninstall: async () => undefined,
+            Quit: async () => undefined
+          }
+        }
+      };
+    },
+    { machine, recipes, healthyDrop }
+  );
+
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: "Give this computer a job." })
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Try Drop" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Set up Drop" })
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Choose folder" }).click();
+  await expect(page.getByText("/Users/max/Downloads/Spare")).toBeVisible();
+  await page.getByRole("button", { name: "Start Drop" }).click();
+  await expect(
+    page.getByRole("heading", { name: "This computer is a Drop" })
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open Drop" })).toBeVisible();
+  await page.getByRole("button", { name: "Add files to Drop" }).click();
+  await expect(page.getByText("8 files")).toBeVisible();
+  await page.getByRole("button", { name: "Share access" }).click();
+  await expect(page.getByRole("img", { name: /QR code for/ })).toBeVisible();
+  await expect(page.getByText("http://192.168.1.24:7340")).toBeVisible();
+  if (process.env.VISUAL_CAPTURE) {
+    await page.screenshot({
+      path: "test-results/desktop-drop-home.png",
+      fullPage: true
+    });
+  }
+
+  await page.getByRole("button", { name: "Stop Drop" }).click();
+  await expect(page.getByRole("button", { name: "Start Drop" })).toBeVisible();
+  await page.getByRole("button", { name: "Start Drop" }).click();
+  await expect(page.getByRole("button", { name: "Stop Drop" })).toBeVisible();
+  await page.getByRole("button", { name: "Configure" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Configure Drop" })
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Save configuration" }).click();
+  await expect(
+    page.getByRole("heading", { name: "This computer is a Drop" })
+  ).toBeVisible();
+
+  await page
+    .getByRole("button", { name: "Activity", exact: true })
+    .click();
+  await expect(
+    page.locator(".desktop-activity-list").getByText("Drop started.")
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Show file" })
+  ).toBeVisible();
+
+  const results = await new AxeBuilder({ page }).analyze();
+  expect(results.violations).toEqual([]);
+  if (process.env.VISUAL_CAPTURE) {
+    await page.screenshot({
+      path: "test-results/desktop-drop-activity.png",
+      fullPage: true
+    });
+  }
+
+  await page.setViewportSize({ width: 320, height: 800 });
+  const overflowsAt320 = await page.evaluate(
+    () =>
+      document.documentElement.scrollWidth >
+      document.documentElement.clientWidth
+  );
+  expect(overflowsAt320).toBe(false);
+
+  await page.setViewportSize({ width: 640, height: 800 });
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = "200%";
+  });
+  const overflowsAt200Percent = await page.evaluate(
+    () =>
+      document.documentElement.scrollWidth >
+      document.documentElement.clientWidth
+  );
+  expect(overflowsAt200Percent).toBe(false);
+
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Notifications" })
+  ).toBeVisible();
+  await expect(page.getByText("Drop notifications")).toBeVisible();
+  await expect(page.getByText("Site notifications")).toBeVisible();
+  await expect(page.getByText("Hook notifications")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Export backup" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Open remote dashboard" })
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Open remote dashboard" }).click();
+  await expect(
+    page
+      .getByRole("paragraph")
+      .filter({ hasText: "The remote dashboard opened in your browser." })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Show selected folder" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Choose another folder" })
+  ).toBeVisible();
+  const settingsOverflowAt200Percent = await page.evaluate(
+    () =>
+      document.documentElement.scrollWidth >
+      document.documentElement.clientWidth
+  );
+  expect(settingsOverflowAt200Percent).toBe(false);
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = "100%";
+  });
+  await page.setViewportSize({ width: 320, height: 800 });
+  const settingsOverflowAt320 = await page.evaluate(
+    () =>
+      document.documentElement.scrollWidth >
+      document.documentElement.clientWidth
+  );
+  expect(settingsOverflowAt320).toBe(false);
+  if (process.env.VISUAL_CAPTURE) {
+    await page.setViewportSize({ width: 1120, height: 760 });
+    await page.screenshot({
+      path: "test-results/desktop-settings.png",
+      fullPage: true
+    });
+  }
 });

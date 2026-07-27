@@ -9,9 +9,12 @@ SMOKE_DROP="$SMOKE_ROOT/drop"
 SMOKE_DROP_RESTORED="$SMOKE_ROOT/drop-restored"
 SMOKE_BACKUP="$SMOKE_ROOT/drop.spare-backup"
 SMOKE_UPLOAD="$SMOKE_ROOT/upload.txt"
+SMOKE_DAEMON_PID=""
 
 cleanup() {
-  if [ -f "$SMOKE_STATE/endpoint.json" ]; then
+  if [ -n "$SMOKE_DAEMON_PID" ]; then
+    kill "$SMOKE_DAEMON_PID" 2>/dev/null || true
+  elif [ -f "$SMOKE_STATE/endpoint.json" ]; then
     endpoint_pid=$(sed -n 's/.*"pid":\([0-9][0-9]*\).*/\1/p' "$SMOKE_STATE/endpoint.json")
     if [ -n "$endpoint_pid" ]; then
       kill "$endpoint_pid" 2>/dev/null || true
@@ -31,6 +34,7 @@ export SPARED_PATH="$PROJECT_ROOT/bin/spared"
 export SPARE_NO_SERVICE=1
 
 "$PROJECT_ROOT/bin/spare" init >/dev/null
+SMOKE_DAEMON_PID=$(sed -n 's/.*"pid":\([0-9][0-9]*\).*/\1/p' "$SMOKE_STATE/endpoint.json")
 "$PROJECT_ROOT/bin/spare" install site --path "$SMOKE_SITE" --port 7398 >/dev/null
 
 attempt=0

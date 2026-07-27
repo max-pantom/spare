@@ -21,13 +21,46 @@ GET    /api/v1/recipes
 GET    /api/v1/instances
 GET    /api/v1/instances/{id}
 GET    /api/v1/events
+GET    /api/v1/activity/stream
 POST   /api/v1/instances
 POST   /api/v1/instances/{id}/start
 POST   /api/v1/instances/{id}/stop
 POST   /api/v1/instances/{id}/heartbeat
+POST   /api/v1/instances/{id}/promote
+POST   /api/v1/instances/{id}/configure
 POST   /api/v1/browser-sessions
+POST   /api/v1/desktop/backups/export
+POST   /api/v1/desktop/backups/restore
+POST   /api/v1/desktop/drop-files
 DELETE /api/v1/instances/{id}
 ```
+
+`GET /api/v1/activity/stream` is an authenticated server-sent event stream of
+newly committed `Event` values. Clients reconnect and refresh `GET
+/api/v1/events` if a slow connection misses an event.
+
+`POST /api/v1/instances/{id}/promote` converts a live temporary instance into
+an installed instance without restarting it. The desktop quit confirmation
+uses this when the user selects **Keep Drop running**.
+
+Spare Desktop reads the protected token in its Go layer and exposes only
+bounded Wails methods to React. It does not use browser pairing codes or store
+the bearer token in JavaScript.
+
+The `/api/v1/desktop/*` filesystem operations require bearer authentication.
+A browser-session cookie is deliberately rejected even when it belongs to the
+local dashboard. These endpoints export or restore a selected backup and copy
+explicitly selected local files into an active Drop.
+
+Creating, configuring, promoting, or removing an instance also requires the
+local bearer token. A browser session may inspect status and use the bounded
+start/stop controls, but it cannot select local folders or change installation
+metadata.
+
+`POST /api/v1/instances/{id}/configure` validates the same manifest fields as
+creation. The daemon stops and restarts a running worker, keeps the old
+selected folder untouched, and restores the previous configuration if the new
+worker cannot start.
 
 ## Create Site
 

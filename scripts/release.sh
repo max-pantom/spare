@@ -46,12 +46,17 @@ do
     -o "$package_dir/spared$binary_suffix" "$PROJECT_ROOT/cmd/spared"
 
   cp "$PROJECT_ROOT/README.md" "$package_dir/README.md"
+  printf '%s\n' "$RELEASE_VERSION" > "$package_dir/VERSION"
+  mkdir -p "$package_dir/recipes"
+  cp "$RELEASE_DIR/site_${RELEASE_VERSION}.sp" "$package_dir/recipes/"
+  cp "$RELEASE_DIR/drop_${RELEASE_VERSION}.sp" "$package_dir/recipes/"
+  cp "$RELEASE_DIR/hook_${RELEASE_VERSION}.sp" "$package_dir/recipes/"
   if [ "$target_os" = "windows" ]; then
     cp "$PROJECT_ROOT/installers/install.ps1" "$package_dir/install.ps1"
     cp "$PROJECT_ROOT/installers/uninstall.ps1" "$package_dir/uninstall.ps1"
     (
       cd "$package_dir"
-      zip -q "$RELEASE_DIR/$package_name.zip" ./*
+      zip -qr "$RELEASE_DIR/$package_name.zip" ./*
     )
   else
     cp "$PROJECT_ROOT/installers/install.sh" "$package_dir/install.sh"

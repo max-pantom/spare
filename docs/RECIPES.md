@@ -26,6 +26,12 @@ people using Spare do not need to know its archive format.
 
 ## Validate a recipe
 
+Validate a trusted built-in recipe by ID:
+
+```bash
+spare recipe validate site
+```
+
 Validate an unpacked directory:
 
 ```bash
@@ -59,12 +65,14 @@ spare recipe pack ./recipes/drop --output drop.sp
 Inspect its normalized manifest:
 
 ```bash
+spare recipe inspect drop
 spare recipe inspect drop.sp
 ```
 
-Open the complete package in a local browser:
+Open a bundled default or a package in a local browser:
 
 ```bash
+spare view drop
 spare view drop.sp
 ```
 

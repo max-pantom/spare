@@ -94,7 +94,12 @@ func newServer() *server {
 
 func (s *server) serve(port, healthPort int) error {
 	healthServer, err := health.Start(healthPort, func() health.Snapshot {
-		return health.Snapshot{Status: "healthy", ItemCount: s.count()}
+		count, latest := s.healthSummary()
+		return health.Snapshot{
+			Status:     "healthy",
+			ItemCount:  count,
+			LatestItem: latest,
+		}
 	})
 	if err != nil {
 		return err
@@ -313,6 +318,16 @@ func (s *server) count() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.requests)
+}
+
+func (s *server) healthSummary() (int, string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if len(s.requests) == 0 {
+		return 0, ""
+	}
+	latest := s.requests[0]
+	return len(s.requests), latest.Method + " " + latest.Path
 }
 
 func (s *server) summaries() []requestSummary {

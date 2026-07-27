@@ -69,6 +69,35 @@ func TestStorePersistsMachineInstanceAndEvents(t *testing.T) {
 	}
 }
 
+func TestStorePublishesCommittedEvents(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events := store.SubscribeEvents(ctx)
+	if err := store.AddEvent(context.Background(), model.Event{
+		Level:   "info",
+		Kind:    "drop_file_received",
+		Message: "report.pdf was received.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case event := <-events:
+		if event.ID == 0 || event.Kind != "drop_file_received" ||
+			event.Message != "report.pdf was received." {
+			t.Fatalf("unexpected event: %#v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for committed event")
+	}
+}
+
 func TestMigrationRecordsCurrentSchemaVersion(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.db")
 	store, err := Open(path)

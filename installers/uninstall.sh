@@ -1,6 +1,12 @@
 #!/bin/sh
 set -eu
 
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+bundled_version=
+if [ -f "$script_dir/VERSION" ]; then
+  IFS= read -r bundled_version < "$script_dir/VERSION"
+fi
+VERSION=${SPARE_VERSION:-${bundled_version:-0.1.0}}
 INSTALL_DIR=${SPARE_INSTALL_DIR:-"$HOME/.local/bin"}
 
 if [ -x "$INSTALL_DIR/spare" ]; then
@@ -27,4 +33,14 @@ if [ -d "$viewer_app" ]; then
 fi
 
 rm -f "$INSTALL_DIR/spare" "$INSTALL_DIR/spared"
+
+if [ "$(uname -s | tr '[:upper:]' '[:lower:]')" = "darwin" ]; then
+  installed_recipes="$HOME/Library/Application Support/Spare/recipes"
+else
+  installed_recipes="${XDG_STATE_HOME:-"$HOME/.local/state"}/spare/recipes"
+fi
+rm -f "$installed_recipes/site_${VERSION}.sp"
+rm -f "$installed_recipes/drop_${VERSION}.sp"
+rm -f "$installed_recipes/hook_${VERSION}.sp"
+rmdir "$installed_recipes" >/dev/null 2>&1 || true
 echo "Spare binaries were removed. Site source folders were left unchanged."

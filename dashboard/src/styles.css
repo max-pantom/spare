@@ -254,6 +254,14 @@ h1 {
   line-height: 1.55;
 }
 
+.remote-notice {
+  max-width: 62ch;
+  margin-block-start: 1rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -702,5 +710,798 @@ h1 {
 
   .status-dot {
     forced-color-adjust: auto;
+  }
+}
+
+/* Desktop surface */
+
+.desktop-root {
+  min-height: 100vh;
+  background: var(--surface-muted);
+}
+
+.desktop-sidebar {
+  position: fixed;
+  inset-block: 0;
+  inset-inline-start: 0;
+  z-index: 3;
+  display: flex;
+  width: 15.5rem;
+  flex-direction: column;
+  padding: 1.5rem 1rem max(1.25rem, env(safe-area-inset-bottom));
+  background: oklch(0.985 0.006 100 / 0.96);
+  box-shadow: 1px 0 0 oklch(0 0 0 / 0.07);
+}
+
+.desktop-brand {
+  display: flex;
+  min-height: 3.25rem;
+  align-items: center;
+  gap: 0.75rem;
+  padding-inline: 0.55rem;
+}
+
+.desktop-brand > span:last-child,
+.desktop-sidebar-status > span {
+  display: grid;
+  min-width: 0;
+  gap: 0.15rem;
+}
+
+.desktop-brand small,
+.desktop-sidebar-status small {
+  color: var(--muted);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.desktop-nav {
+  display: grid;
+  gap: 0.35rem;
+  margin-block-start: 2rem;
+}
+
+.desktop-nav button {
+  display: grid;
+  min-width: 0;
+  min-height: 2.75rem;
+  grid-template-columns: 1.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.65rem;
+  border: 0;
+  border-radius: 0.8rem;
+  padding-inline: 0.8rem;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 650;
+  text-align: start;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.desktop-nav button:hover {
+  background: oklch(0 0 0 / 0.04);
+  color: var(--ink);
+}
+
+.desktop-nav button[aria-current="page"] {
+  background: oklch(0.9 0.03 145);
+  color: var(--primary);
+}
+
+.desktop-nav button > span {
+  font-size: 1.15rem;
+  text-align: center;
+}
+
+.desktop-sidebar-status {
+  display: grid;
+  min-height: 3.5rem;
+  grid-template-columns: 0.75rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  margin-block-start: auto;
+  border-radius: 1rem;
+  padding: 0.8rem;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.desktop-sidebar-status strong {
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.desktop-main {
+  min-height: 100vh;
+  margin-inline-start: 15.5rem;
+  padding: clamp(2rem, 5vw, 4.5rem);
+  padding-block-end: calc(4rem + env(safe-area-inset-bottom));
+}
+
+.desktop-page {
+  width: min(100%, 64rem);
+  margin-inline: auto;
+}
+
+.desktop-page h1 {
+  max-width: 18ch;
+  font-size: clamp(2.5rem, 6vw, 5.1rem);
+}
+
+.desktop-page-heading {
+  max-width: 48rem;
+}
+
+.desktop-hero {
+  max-width: 52rem;
+  padding-block: clamp(1rem, 5vw, 4rem);
+}
+
+.desktop-loading {
+  padding-block-start: 12vh;
+}
+
+.desktop-error {
+  width: min(100%, 64rem);
+  margin-inline: auto;
+}
+
+.desktop-error .button {
+  margin-block-start: 1rem;
+}
+
+.button-quiet {
+  background: transparent;
+  color: var(--primary);
+  box-shadow: inset 0 0 0 1px oklch(0.35 0.075 155 / 0.22);
+}
+
+.button-danger {
+  background: var(--danger);
+  color: white;
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.16);
+}
+
+.text-button,
+.back-button {
+  min-height: 2.75rem;
+  border: 0;
+  border-radius: 0.7rem;
+  padding-inline: 0.7rem;
+  background: transparent;
+  color: var(--primary);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.back-button {
+  margin-block-end: 2rem;
+  margin-inline-start: -0.7rem;
+}
+
+.ready-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-block-start: clamp(3rem, 7vw, 5rem);
+}
+
+.ready-card {
+  display: grid;
+  min-width: 0;
+  min-height: 8.5rem;
+  grid-template-columns: 3rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1rem;
+  border: 0;
+  border-radius: 1.5rem;
+  padding: 1.25rem;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  text-align: start;
+  cursor: pointer;
+}
+
+.ready-card:hover {
+  box-shadow: var(--shadow-hover);
+}
+
+.ready-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.ready-card > span:nth-child(2) {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.ready-card small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.recipe-icon {
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  place-items: center;
+  border-radius: 0.9rem;
+  background: oklch(0.9 0.03 145);
+  color: var(--primary);
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.recipe-icon-site {
+  background: oklch(0.92 0.035 250);
+  color: oklch(0.42 0.11 250);
+}
+
+.recipe-icon-hook {
+  background: oklch(0.93 0.04 75);
+  color: oklch(0.43 0.1 70);
+}
+
+.desktop-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1rem 0 0;
+}
+
+.desktop-metrics > div,
+.machine-grid > div {
+  min-width: 0;
+  border-radius: 1.2rem;
+  padding: 1.25rem;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.desktop-metrics dt,
+.machine-grid dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.desktop-metrics dd,
+.machine-grid dd {
+  margin: 0.55rem 0 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.desktop-share {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(12rem, 0.65fr);
+  align-items: center;
+  gap: 2rem;
+  margin-block-start: 1rem;
+  border-radius: 1.6rem;
+  padding: clamp(1.5rem, 4vw, 2.5rem);
+  background: var(--ink);
+  color: white;
+}
+
+.desktop-share .eyebrow,
+.desktop-share p {
+  color: oklch(0.82 0.02 145);
+}
+
+.desktop-share h2 {
+  margin: 0;
+  font-size: clamp(1.75rem, 4vw, 2.75rem);
+  letter-spacing: -0.04em;
+}
+
+.desktop-share p {
+  max-width: 36rem;
+  line-height: 1.55;
+}
+
+.desktop-share .text-button {
+  margin-inline-start: -0.7rem;
+  color: white;
+}
+
+.desktop-qr {
+  display: grid;
+  justify-items: center;
+  gap: 0.8rem;
+}
+
+.desktop-qr img {
+  width: min(11rem, 100%);
+  height: auto;
+  border-radius: 0.75rem;
+  outline: 1px solid oklch(1 0 0 / 0.1);
+}
+
+.desktop-qr code {
+  max-width: 100%;
+  color: oklch(0.88 0.02 145);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.desktop-section {
+  margin-block-start: clamp(3.5rem, 7vw, 6rem);
+}
+
+.desktop-section-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-block-end: 1.5rem;
+}
+
+.desktop-section-heading h2 {
+  margin: 0;
+  font-size: 2rem;
+  letter-spacing: -0.035em;
+}
+
+.desktop-section-heading .eyebrow {
+  margin-block-end: 0.55rem;
+}
+
+.desktop-activity-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.desktop-activity-list li {
+  display: grid;
+  min-height: 4.5rem;
+  grid-template-columns: 0.75rem minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 1rem;
+  border-radius: 1rem;
+  padding: 1rem 1.15rem;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.desktop-activity-list p {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+}
+
+.desktop-activity-list time {
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-align: end;
+}
+
+.desktop-empty {
+  border-radius: 1.2rem;
+  padding: 1.5rem;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.desktop-empty p {
+  margin: 0.5rem 0 0;
+  color: var(--muted);
+}
+
+.setup-form,
+.settings-groups {
+  display: grid;
+  gap: 2rem;
+  width: min(100%, 45rem);
+  margin-block-start: 3rem;
+}
+
+.setup-field {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.setup-field > label,
+.mode-picker legend {
+  font-weight: 700;
+}
+
+.setup-field > p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.setup-field > input:not([type="checkbox"]),
+.folder-picker output {
+  min-height: 2.75rem;
+  width: 100%;
+  border: 1px solid oklch(0.68 0.018 150);
+  border-radius: 0.8rem;
+  padding: 0.75rem 0.9rem;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.folder-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+}
+
+.folder-picker output {
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.mode-picker {
+  display: grid;
+  gap: 0.75rem;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.mode-picker legend {
+  margin-block-end: 0.75rem;
+}
+
+.mode-picker label,
+.setting-row {
+  display: grid;
+  min-height: 4.5rem;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.9rem;
+  border-radius: 1rem;
+  padding: 1rem;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+
+.mode-picker label > span,
+.setting-row > span {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.mode-picker small,
+.setting-row small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.mode-picker input,
+.setting-row input {
+  width: 1.15rem;
+  height: 1.15rem;
+  accent-color: var(--primary);
+}
+
+.permission-review {
+  border-radius: 1rem;
+  padding: 0.25rem 1rem;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.permission-review summary {
+  min-height: 2.75rem;
+  padding-block: 0.8rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.permission-review ul {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0 0 1rem;
+  list-style: none;
+}
+
+.permission-review li {
+  display: grid;
+  grid-template-columns: 1.25rem minmax(0, 1fr);
+  gap: 0.5rem;
+  color: var(--muted);
+}
+
+.setup-actions,
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.form-error {
+  border-radius: 0.9rem;
+  padding: 1rem;
+  background: oklch(0.95 0.035 28);
+  color: var(--danger);
+  box-shadow: inset 0 0 0 1px oklch(0.45 0.16 28 / 0.18);
+}
+
+.installed-recipe {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem 2rem;
+  margin-block-start: 3rem;
+  border-radius: 1.5rem;
+  padding: 1.5rem;
+  background: var(--ink);
+  color: white;
+}
+
+.installed-recipe h2 {
+  margin: 0;
+}
+
+.installed-recipe p {
+  color: oklch(0.82 0.02 145);
+}
+
+.installed-recipe .actions {
+  align-self: center;
+  margin: 0;
+}
+
+.installed-recipe .button-quiet {
+  color: white;
+  box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.25);
+}
+
+.remove-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.desktop-recipe-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-block-start: 1rem;
+}
+
+.desktop-recipe-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1.5rem;
+  border-radius: 1.5rem;
+  padding: 1.5rem;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.desktop-recipe-card h2 {
+  margin: 0;
+}
+
+.desktop-recipe-card p {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.desktop-recipe-card .button {
+  margin-block-start: auto;
+}
+
+.machine-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 3rem 0 0;
+}
+
+.machine-warning {
+  margin-block-start: 1rem;
+  border-radius: 1rem;
+  padding: 1rem;
+  background: oklch(0.95 0.035 75);
+  color: oklch(0.39 0.105 70);
+}
+
+.settings-groups > section {
+  border-radius: 1.5rem;
+  padding: 1.5rem;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.settings-groups h2 {
+  margin: 0 0 1rem;
+}
+
+.settings-groups > section > p {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.setting-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding-inline: 0;
+  box-shadow: none;
+}
+
+.setting-row-nested {
+  min-height: 3.5rem;
+  padding-inline-start: 1rem;
+  border-inline-start: 3px solid var(--border);
+}
+
+.settings-actions {
+  margin-block-start: 1.25rem;
+}
+
+.settings-path {
+  display: block;
+  max-inline-size: 100%;
+  margin-block-end: 1rem;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+
+.backup-selection {
+  display: grid;
+  gap: 0.75rem;
+  margin-block-start: 1rem;
+  border-radius: 1rem;
+  padding: 1rem;
+  background: var(--surface-muted);
+}
+
+.backup-selection code {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+
+.backup-selection .button {
+  justify-self: start;
+}
+
+.danger-zone {
+  box-shadow:
+    0 0 0 1px oklch(0.45 0.16 28 / 0.18),
+    0 12px 36px -20px oklch(0.45 0.16 28 / 0.2) !important;
+}
+
+.settings-message {
+  width: min(100%, 45rem);
+  margin-block-start: 1rem;
+  color: var(--muted);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .desktop-nav button,
+  .ready-card,
+  .text-button,
+  .back-button {
+    transition-property: background-color, box-shadow, color, scale;
+    transition-duration: 130ms;
+    transition-timing-function: ease-out;
+  }
+
+  .ready-card:not(:disabled):active,
+  .text-button:active,
+  .back-button:active {
+    scale: 0.96;
+  }
+}
+
+@media (max-width: 58rem) {
+  .ready-grid,
+  .desktop-recipe-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .desktop-share {
+    grid-template-columns: 1fr;
+  }
+
+  .desktop-qr {
+    justify-items: start;
+  }
+}
+
+@media (max-width: 45rem) {
+  .desktop-sidebar {
+    position: sticky;
+    inset-block-start: 0;
+    width: 100%;
+    height: auto;
+    padding: max(0.75rem, env(safe-area-inset-top)) 1rem 0.65rem;
+    box-shadow: 0 1px 0 oklch(0 0 0 / 0.07);
+  }
+
+  .desktop-brand {
+    display: none;
+  }
+
+  .desktop-nav {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0.2rem;
+    margin: 0;
+  }
+
+  .desktop-nav button {
+    min-height: 3rem;
+    grid-template-columns: 1fr;
+    gap: 0.1rem;
+    justify-items: center;
+    padding-inline: 0.2rem;
+    font-size: 0.68rem;
+  }
+
+  .desktop-nav button > span {
+    font-size: 1rem;
+  }
+
+  .desktop-sidebar-status {
+    display: none;
+  }
+
+  .desktop-main {
+    margin-inline-start: 0;
+    padding: 2rem 1rem calc(3rem + env(safe-area-inset-bottom));
+  }
+
+  .desktop-metrics,
+  .machine-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .installed-recipe {
+    grid-template-columns: 1fr;
+  }
+
+  .folder-picker {
+    grid-template-columns: 1fr;
+  }
+
+  .desktop-activity-list li {
+    grid-template-columns: 0.75rem minmax(0, 1fr);
+  }
+
+  .desktop-activity-list time {
+    grid-column: 2;
+    text-align: start;
+  }
+
+  .desktop-activity-list .activity-action {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
+@media (forced-colors: active) {
+  .desktop-sidebar,
+  .ready-card,
+  .desktop-metrics > div,
+  .desktop-share,
+  .desktop-activity-list li,
+  .setup-field > input,
+  .folder-picker output,
+  .mode-picker label,
+  .permission-review,
+  .installed-recipe,
+  .desktop-recipe-card,
+  .machine-grid > div,
+  .settings-groups > section {
+    border: 1px solid CanvasText;
   }
 }

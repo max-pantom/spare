@@ -102,3 +102,28 @@ export type APIError = {
     hint?: string;
   };
 };
+
+export type DesktopPreferences = {
+  notifications: boolean;
+  recipeNotifications: Record<string, boolean>;
+  openAfterLogin: boolean;
+  showInMenuBar: boolean;
+  keepRecipesRunningAfterLogin: boolean;
+};
+
+export type DesktopSnapshot = {
+  surface: "desktop";
+  machine: Machine;
+  recipes: Recipe[];
+  instances: Instance[];
+  events: Event[];
+  preferences: DesktopPreferences;
+};
+
+export type CreateInstanceInput = {
+  recipeId: string;
+  mode: "temporary" | "installed";
+  config: Record<string, unknown>;
+  port: number;
+  portMode: "auto" | "fixed";
+};

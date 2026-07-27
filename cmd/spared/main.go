@@ -21,6 +21,7 @@ import (
 	"github.com/spare-run/spare/internal/dashboard"
 	"github.com/spare-run/spare/internal/model"
 	"github.com/spare-run/spare/internal/paths"
+	"github.com/spare-run/spare/internal/preferences"
 	"github.com/spare-run/spare/internal/profile"
 	"github.com/spare-run/spare/internal/recipes"
 	spareRuntime "github.com/spare-run/spare/internal/runtime"
@@ -148,7 +149,9 @@ func runDaemon() error {
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	manager.Restore()
+	if preferences.Load(statePaths.Root).KeepRecipesRunningAfterLogin {
+		manager.Restore()
+	}
 	slog.Info("Spare daemon started", "version", version, "url", baseURL)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

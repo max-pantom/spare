@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/spare-run/spare/internal/model"
@@ -13,7 +14,9 @@ import (
 )
 
 type Store struct {
-	db *sql.DB
+	db          *sql.DB
+	subscribers map[chan model.Event]struct{}
+	subMu       sync.Mutex
 }
 
 func Open(path string) (*Store, error) {
@@ -22,7 +25,7 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	store := &Store{db: db}
+	store := &Store{db: db, subscribers: map[chan model.Event]struct{}{}}
 	if err := store.migrate(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -157,11 +160,44 @@ func (s *Store) AddEvent(ctx context.Context, event model.Event) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `
+	result, err := s.db.ExecContext(ctx, `
 		INSERT INTO events(instance_id, level, kind, message, details, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 	`, event.InstanceID, event.Level, event.Kind, event.Message, details, event.CreatedAt.Format(time.RFC3339Nano))
+	if err != nil {
+		return err
+	}
+	event.ID, _ = result.LastInsertId()
+	s.publishEvent(event)
 	return err
+}
+
+// SubscribeEvents reports newly committed events until ctx is cancelled. A
+// slow observer may miss an event and should refresh the events endpoint.
+func (s *Store) SubscribeEvents(ctx context.Context) <-chan model.Event {
+	events := make(chan model.Event, 16)
+	s.subMu.Lock()
+	s.subscribers[events] = struct{}{}
+	s.subMu.Unlock()
+	go func() {
+		<-ctx.Done()
+		s.subMu.Lock()
+		delete(s.subscribers, events)
+		close(events)
+		s.subMu.Unlock()
+	}()
+	return events
+}
+
+func (s *Store) publishEvent(event model.Event) {
+	s.subMu.Lock()
+	defer s.subMu.Unlock()
+	for subscriber := range s.subscribers {
+		select {
+		case subscriber <- event:
+		default:
+		}
+	}
 }
 
 func (s *Store) Events(ctx context.Context, limit int) ([]model.Event, error) {

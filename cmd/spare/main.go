@@ -19,8 +19,8 @@ import (
 	"time"
 
 	"github.com/spare-run/spare/internal/api"
-	"github.com/spare-run/spare/internal/auth"
 	"github.com/spare-run/spare/internal/backup"
+	"github.com/spare-run/spare/internal/bootstrap"
 	"github.com/spare-run/spare/internal/doctor"
 	"github.com/spare-run/spare/internal/model"
 	"github.com/spare-run/spare/internal/paths"
@@ -29,8 +29,7 @@ import (
 	"github.com/spare-run/spare/internal/recipe"
 	"github.com/spare-run/spare/internal/recipes"
 	"github.com/spare-run/spare/internal/recipeview"
-	"github.com/spare-run/spare/internal/service"
-	"github.com/spare-run/spare/internal/state"
+	"github.com/spare-run/spare/internal/uninstall"
 	"github.com/spf13/cobra"
 )
 
@@ -87,11 +86,15 @@ func (a *app) rootCommand() *cobra.Command {
 func (a *app) viewCommand() *cobra.Command {
 	var noOpen bool
 	command := &cobra.Command{
-		Use:   "view <package.sp>",
-		Short: "Open a recipe package in a safe local viewer",
+		Use:   "view <recipe|package.sp>",
+		Short: "Open a built-in recipe or package in a safe local viewer",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
-			viewer, err := recipeview.New(args[0])
+			source, err := a.recipePackageReference(args[0])
+			if err != nil {
+				return err
+			}
+			viewer, err := recipeview.New(source)
 			if err != nil {
 				return err
 			}
@@ -124,41 +127,11 @@ func (a *app) initCommand() *cobra.Command {
 		Short: "Prepare this computer to run Spare",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
-			if err := a.paths.Ensure(); err != nil {
-				return err
-			}
-			if _, err := auth.EnsureToken(a.paths.Token); err != nil {
-				return err
-			}
-			store, err := state.Open(a.paths.Database)
+			daemon, err := bootstrap.FindDaemon()
 			if err != nil {
 				return err
 			}
-			var existing *model.Machine
-			if current, readErr := store.Machine(command.Context()); readErr == nil {
-				existing = &current
-			}
-			machine, err := profile.Collect(existing, a.paths.Root)
-			if err == nil {
-				err = store.SaveMachine(command.Context(), machine)
-			}
-			_ = store.Close()
-			if err != nil {
-				return err
-			}
-
-			daemon, err := findDaemon()
-			if err != nil {
-				return err
-			}
-			if err := service.InstallAndStart(command.Context(), daemon, a.paths.Root); err != nil {
-				return err
-			}
-			client, err := a.waitForDaemon(command.Context(), 10*time.Second)
-			if err != nil {
-				return err
-			}
-			initialized, err := client.Machine(command.Context())
+			_, initialized, err := bootstrap.Ensure(command.Context(), a.paths, daemon)
 			if err != nil {
 				return err
 			}
@@ -202,26 +175,33 @@ func (a *app) recipeCommand() *cobra.Command {
 			},
 		},
 		&cobra.Command{
-			Use:   "validate <directory|manifest|package.sp>",
+			Use:   "validate <recipe|directory|manifest|package.sp>",
 			Short: "Validate a recipe manifest or package",
 			Args:  cobra.ExactArgs(1),
 			RunE: func(command *cobra.Command, args []string) error {
-				manifest, err := recipe.Load(args[0])
+				manifest, builtIn, err := a.recipeManifestReference(args[0])
 				if err != nil {
 					return err
 				}
 				compatibility := recipe.CurrentPlatformCompatible(manifest)
-				fmt.Fprintf(a.out, "%s %s is valid.\nCompatibility: %s\n", manifest.Name, manifest.Version, compatibility.Rating)
+				kind := ""
+				if builtIn {
+					kind = " built-in"
+				}
+				fmt.Fprintf(a.out, "%s %s is a valid%s recipe.\nCompatibility: %s\n", manifest.Name, manifest.Version, kind, compatibility.Rating)
+				if packagePath, packageErr := a.findBuiltInPackage(manifest); builtIn && packageErr == nil {
+					fmt.Fprintf(a.out, "Package: %s\n", packagePath)
+				}
 				return nil
 			},
 		},
 		a.recipePackCommand(),
 		&cobra.Command{
-			Use:   "inspect <directory|manifest|package.sp>",
+			Use:   "inspect <recipe|directory|manifest|package.sp>",
 			Short: "Print a recipe manifest",
 			Args:  cobra.ExactArgs(1),
 			RunE: func(command *cobra.Command, args []string) error {
-				manifest, err := recipe.Load(args[0])
+				manifest, _, err := a.recipeManifestReference(args[0])
 				if err != nil {
 					return err
 				}
@@ -230,6 +210,94 @@ func (a *app) recipeCommand() *cobra.Command {
 		},
 	)
 	return command
+}
+
+func (a *app) recipeManifestReference(reference string) (recipe.Manifest, bool, error) {
+	registry, err := recipes.Builtins()
+	if err != nil {
+		return recipe.Manifest{}, false, err
+	}
+	if implementation, ok := registry.Get(strings.ToLower(reference)); ok {
+		manifest := implementation.Manifest()
+		if packagePath, packageErr := a.findBuiltInPackage(manifest); packageErr == nil {
+			packaged, loadErr := recipe.Load(packagePath)
+			if loadErr != nil {
+				return recipe.Manifest{}, true, loadErr
+			}
+			if !reflect.DeepEqual(packaged, manifest) {
+				return recipe.Manifest{}, true, fmt.Errorf(
+					"bundled package %s does not match the trusted built-in %s manifest",
+					packagePath,
+					manifest.Name,
+				)
+			}
+		}
+		return manifest, true, nil
+	}
+	manifest, err := recipe.Load(reference)
+	return manifest, false, err
+}
+
+func (a *app) recipePackageReference(reference string) (string, error) {
+	if info, err := os.Stat(reference); err == nil {
+		if info.Mode().IsRegular() && strings.EqualFold(filepath.Ext(reference), ".sp") {
+			return filepath.Abs(reference)
+		}
+		return "", fmt.Errorf("%s is not a .sp recipe package", reference)
+	}
+	registry, err := recipes.Builtins()
+	if err != nil {
+		return "", err
+	}
+	implementation, ok := registry.Get(strings.ToLower(reference))
+	if !ok {
+		return "", fmt.Errorf(
+			"%q is neither a built-in recipe ID nor a readable .sp package; use `spare recipe list` to see the defaults",
+			reference,
+		)
+	}
+	return a.findBuiltInPackage(implementation.Manifest())
+}
+
+func (a *app) findBuiltInPackage(manifest recipe.Manifest) (string, error) {
+	name := fmt.Sprintf("%s_%s.sp", manifest.ID, manifest.Version)
+	candidates := []string{
+		filepath.Join(a.paths.Root, "recipes", name),
+	}
+	if executable, err := os.Executable(); err == nil {
+		if resolved, resolveErr := filepath.EvalSymlinks(executable); resolveErr == nil {
+			executable = resolved
+		}
+		directory := filepath.Dir(executable)
+		candidates = append(candidates,
+			filepath.Join(directory, "recipes", name),
+			filepath.Join(directory, "..", "recipes", name),
+		)
+	}
+	if workingDirectory, err := os.Getwd(); err == nil {
+		candidates = append(candidates,
+			filepath.Join(workingDirectory, "recipes", name),
+			filepath.Join(workingDirectory, "dist", "recipes", name),
+			filepath.Join(workingDirectory, "dist", "releases", name),
+		)
+	}
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		absolute, err := filepath.Abs(candidate)
+		if err != nil || seen[absolute] {
+			continue
+		}
+		seen[absolute] = true
+		info, err := os.Stat(absolute)
+		if err == nil && info.Mode().IsRegular() {
+			return absolute, nil
+		}
+	}
+	return "", fmt.Errorf(
+		"%s is built into Spare, but its viewable package %s was not found; reinstall Spare with its bundled recipes",
+		manifest.Name,
+		name,
+	)
 }
 
 func (a *app) recipePackCommand() *cobra.Command {
@@ -686,25 +754,7 @@ func (a *app) uninstallCommand() *cobra.Command {
 					return nil
 				}
 			}
-			var endpoint paths.Endpoint
-			if client, err := api.Discover(a.paths); err == nil {
-				endpoint, _ = a.paths.ReadEndpoint()
-				if instances, listErr := client.Instances(command.Context()); listErr == nil {
-					for _, current := range instances {
-						_ = client.Remove(command.Context(), current.ID)
-					}
-				}
-			}
-			if err := service.Uninstall(command.Context(), a.paths.Root); err != nil {
-				return err
-			}
-			if os.Getenv("SPARE_NO_SERVICE") == "1" && endpoint.PID > 0 {
-				if process, err := os.FindProcess(endpoint.PID); err == nil {
-					_ = process.Kill()
-				}
-			}
-			time.Sleep(200 * time.Millisecond)
-			if err := os.RemoveAll(a.paths.Root); err != nil {
+			if err := uninstall.Remove(command.Context(), a.paths); err != nil {
 				return err
 			}
 			fmt.Fprintln(a.out, "Spare was removed. Selected folders were left unchanged.")
@@ -784,42 +834,11 @@ func printDoctor(output io.Writer, report doctor.Report) {
 }
 
 func (a *app) waitForDaemon(ctx context.Context, timeout time.Duration) (*api.Client, error) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		client, err := api.Discover(a.paths)
-		if err == nil {
-			checkContext, cancel := context.WithTimeout(ctx, time.Second)
-			err = client.Health(checkContext)
-			cancel()
-			if err == nil {
-				return client, nil
-			}
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	return nil, errors.New("Spare did not start. Run `spare doctor` and check the daemon log")
+	return bootstrap.WaitForDaemon(ctx, a.paths, timeout)
 }
 
 func findDaemon() (string, error) {
-	if configured := os.Getenv("SPARED_PATH"); configured != "" {
-		return filepath.Abs(configured)
-	}
-	current, err := os.Executable()
-	if err == nil {
-		name := "spared"
-		if runtime.GOOS == "windows" {
-			name += ".exe"
-		}
-		sibling := filepath.Join(filepath.Dir(current), name)
-		if _, statErr := os.Stat(sibling); statErr == nil {
-			return sibling, nil
-		}
-	}
-	path, err := exec.LookPath("spared")
-	if err != nil {
-		return "", errors.New("could not find `spared`; install the Spare CLI and daemon together")
-	}
-	return filepath.Abs(path)
+	return bootstrap.FindDaemon()
 }
 
 func parsePort(value string) (int, string, error) {

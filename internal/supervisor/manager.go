@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/spare-run/spare/internal/backup"
 	"github.com/spare-run/spare/internal/discovery"
 	"github.com/spare-run/spare/internal/health"
 	instancepkg "github.com/spare-run/spare/internal/instance"
@@ -158,6 +160,197 @@ func (m *Manager) Recipes() []model.Recipe {
 	return m.registry.Models(m.machine)
 }
 
+func (m *Manager) ExportBackup(id, destination string) error {
+	m.mu.Lock()
+	current, ok := m.workers[id]
+	if !ok {
+		m.mu.Unlock()
+		return &ManagerError{
+			Code:    "instance_not_found",
+			Message: "The requested recipe is not installed.",
+			Hint:    "Open Recipes to see the active job.",
+		}
+	}
+	instance := current.instance
+	m.mu.Unlock()
+	if err := backup.ExportInstance(instance, destination); err != nil {
+		return &ManagerError{
+			Code:    "backup_export_failed",
+			Message: "Spare could not create the backup.",
+			Hint:    err.Error(),
+		}
+	}
+	_ = m.store.AddEvent(context.Background(), model.Event{
+		InstanceID: instance.ID,
+		Level:      "info",
+		Kind:       "backup_exported",
+		Message:    m.title(instance.RecipeID) + " backup was exported.",
+		Details:    map[string]any{"destination": destination},
+		CreatedAt:  time.Now().UTC(),
+	})
+	return nil
+}
+
+func (m *Manager) RestoreBackup(source, destination string) (model.Instance, error) {
+	manifest, err := backup.Inspect(source)
+	if err != nil {
+		return model.Instance{}, &ManagerError{
+			Code:    "backup_invalid",
+			Message: "Spare could not read this backup.",
+			Hint:    err.Error(),
+		}
+	}
+	implementation, ok := m.registry.Get(manifest.RecipeID)
+	if !ok {
+		return model.Instance{}, &ManagerError{
+			Code:    "unknown_recipe",
+			Message: fmt.Sprintf("Recipe %q is not available.", manifest.RecipeID),
+			Hint:    "Restore a backup made by one of this release's built-in recipes.",
+		}
+	}
+	m.mu.Lock()
+	hasInstance := len(m.workers) > 0
+	m.mu.Unlock()
+	if hasInstance {
+		return model.Instance{}, &ManagerError{
+			Code:    "role_already_exists",
+			Message: "This computer already has an active job.",
+			Hint:    "Remove the current job before restoring a backup.",
+		}
+	}
+	if _, err := backup.Import(source, destination); err != nil {
+		return model.Instance{}, &ManagerError{
+			Code:    "backup_restore_failed",
+			Message: "Spare could not restore this backup.",
+			Hint:    err.Error(),
+		}
+	}
+	values := manifest.Config
+	if values == nil {
+		values = map[string]any{}
+	}
+	if pathField := implementation.Manifest().Storage.PathField; pathField != "" {
+		values[pathField] = destination
+	}
+	instance, err := m.Create(CreateRequest{
+		RecipeID: manifest.RecipeID,
+		Mode:     model.ModeInstalled,
+		Config:   values,
+		Port:     manifest.Port,
+		PortMode: manifest.PortMode,
+	})
+	if err != nil {
+		return model.Instance{}, &ManagerError{
+			Code:    "backup_install_failed",
+			Message: "The backup data was restored, but its job could not start.",
+			Hint:    fmt.Sprintf("The restored files remain in %s. %v", destination, err),
+		}
+	}
+	_ = m.store.AddEvent(context.Background(), model.Event{
+		InstanceID: instance.ID,
+		Level:      "info",
+		Kind:       "backup_restored",
+		Message:    m.title(instance.RecipeID) + " backup was restored.",
+		Details:    map[string]any{"source": source, "destination": destination},
+		CreatedAt:  time.Now().UTC(),
+	})
+	return instance, nil
+}
+
+func (m *Manager) AddDropFiles(id string, sources []string) ([]string, error) {
+	if len(sources) == 0 || len(sources) > 100 {
+		return nil, &ManagerError{
+			Code:    "invalid_file_selection",
+			Message: "Choose between 1 and 100 files.",
+			Hint:    "Add fewer files and try again.",
+		}
+	}
+	m.mu.Lock()
+	current, ok := m.workers[id]
+	if !ok || current.instance.RecipeID != model.RecipeDrop {
+		m.mu.Unlock()
+		return nil, &ManagerError{
+			Code:    "drop_not_found",
+			Message: "Drop is not active on this computer.",
+			Hint:    "Set up Drop before adding files.",
+		}
+	}
+	instance := current.instance
+	m.mu.Unlock()
+	root, err := filepath.EvalSymlinks(instance.DataPath)
+	if err != nil {
+		return nil, &ManagerError{
+			Code:    "drop_folder_unavailable",
+			Message: "Drop's selected folder is unavailable.",
+			Hint:    "Reconnect the folder or configure Drop again.",
+		}
+	}
+	maximumSize := configInt64(instance.Config["max-file-size"])
+	resolvedSources := make([]string, 0, len(sources))
+	for _, source := range sources {
+		resolved, err := filepath.EvalSymlinks(source)
+		if err != nil {
+			return nil, &ManagerError{
+				Code:    "file_unavailable",
+				Message: "Spare could not open " + filepath.Base(source) + ".",
+				Hint:    err.Error(),
+			}
+		}
+		info, err := os.Stat(resolved)
+		if err != nil || !info.Mode().IsRegular() {
+			return nil, &ManagerError{
+				Code:    "invalid_file_selection",
+				Message: filepath.Base(source) + " is not a regular file.",
+				Hint:    "Choose files rather than folders or special devices.",
+			}
+		}
+		if maximumSize > 0 && info.Size() > maximumSize {
+			return nil, &ManagerError{
+				Code:    "file_too_large",
+				Message: filepath.Base(source) + " is larger than Drop's file limit.",
+				Hint:    "Choose a smaller file or reconfigure Drop with a larger limit.",
+			}
+		}
+		resolvedSources = append(resolvedSources, resolved)
+	}
+	added := make([]string, 0, len(resolvedSources))
+	for _, resolved := range resolvedSources {
+		name, err := copyDropFile(root, resolved)
+		if err != nil {
+			m.recordDropFilesAdded(instance.ID, added)
+			return added, &ManagerError{
+				Code:    "file_copy_failed",
+				Message: "Spare could not add " + filepath.Base(resolved) + " to Drop.",
+				Hint:    err.Error(),
+			}
+		}
+		added = append(added, name)
+	}
+	m.recordDropFilesAdded(instance.ID, added)
+	return added, nil
+}
+
+func (m *Manager) recordDropFilesAdded(id string, added []string) {
+	if len(added) == 0 {
+		return
+	}
+	m.mu.Lock()
+	if current, ok := m.workers[id]; ok {
+		current.instance.ItemCount += len(added)
+		current.instance.UpdatedAt = time.Now().UTC()
+		m.persistLocked(current)
+	}
+	m.mu.Unlock()
+	_ = m.store.AddEvent(context.Background(), model.Event{
+		InstanceID: id,
+		Level:      "info",
+		Kind:       "drop_files_added",
+		Message:    fmt.Sprintf("%d %s added to Drop.", len(added), plural(len(added), "file", "files")),
+		Details:    map[string]any{"count": len(added), "names": added},
+		CreatedAt:  time.Now().UTC(),
+	})
+}
+
 func (m *Manager) Create(request CreateRequest) (model.Instance, error) {
 	implementation, ok := m.registry.Get(request.RecipeID)
 	if !ok {
@@ -289,6 +482,111 @@ func (m *Manager) Get(id string) (model.Instance, error) {
 	return m.decorate(current.instance), nil
 }
 
+func (m *Manager) Configure(id string, request CreateRequest) (model.Instance, error) {
+	m.mu.Lock()
+	current, ok := m.workers[id]
+	if !ok {
+		m.mu.Unlock()
+		return model.Instance{}, instanceNotFound(id)
+	}
+	if request.RecipeID == "" {
+		request.RecipeID = current.instance.RecipeID
+	}
+	if request.RecipeID != current.instance.RecipeID {
+		m.mu.Unlock()
+		return model.Instance{}, &ManagerError{
+			Code:    "recipe_change_requires_removal",
+			Message: "Configuration cannot change this job into another recipe.",
+			Hint:    "Remove the current job, then set up the other recipe.",
+		}
+	}
+	request.Mode = current.instance.Mode
+	oldInstance := current.instance
+	oldRuntime := current.runtime
+	m.mu.Unlock()
+
+	candidate, err := instancepkg.Build(m.registry, request)
+	if err != nil {
+		return model.Instance{}, &ManagerError{
+			Code:    "invalid_recipe_configuration",
+			Message: "The " + m.title(request.RecipeID) + " configuration is invalid.",
+			Hint:    err.Error(),
+		}
+	}
+	driver, ok := m.runtimes[candidate.Runtime]
+	if !ok {
+		return model.Instance{}, &ManagerError{
+			Code:    "runtime_unavailable",
+			Message: fmt.Sprintf("The %s runtime is unavailable.", candidate.Runtime),
+			Hint:    "Reinstall Spare and try again.",
+		}
+	}
+	if err := driver.Prepare(context.Background(), candidate); err != nil {
+		return model.Instance{}, &ManagerError{
+			Code:    "runtime_prepare_failed",
+			Message: "Unable to prepare " + m.title(candidate.RecipeID) + ".",
+			Hint:    err.Error(),
+		}
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current, ok = m.workers[id]
+	if !ok || current.instance.UpdatedAt != oldInstance.UpdatedAt {
+		return model.Instance{}, &ManagerError{
+			Code:    "instance_changed",
+			Message: "The active job changed while its settings were open.",
+			Hint:    "Review the current settings and try again.",
+		}
+	}
+	wasRunning := oldInstance.DesiredState == model.DesiredRunning
+	m.stopProcessLocked(current)
+	port := request.Port
+	if candidate.PortMode == "auto" && oldInstance.PortMode == "auto" &&
+		network.PortAvailable(oldInstance.Port) {
+		port = oldInstance.Port
+	} else {
+		port, err = network.SelectPort(request.Port, candidate.PortMode)
+		if err != nil {
+			if wasRunning {
+				_ = m.launchLocked(current)
+			}
+			return model.Instance{}, managerNetworkError(err)
+		}
+	}
+	candidate.Port = port
+	candidate.CreatedAt = oldInstance.CreatedAt
+	candidate.DesiredState = oldInstance.DesiredState
+	candidate.Status = model.StatusStopped
+	candidate.UpdatedAt = time.Now().UTC()
+	current.instance = candidate
+	current.runtime = driver
+	current.explicitStop = !wasRunning
+	current.crashes = nil
+	if candidate.Mode == model.ModeTemporary {
+		current.leaseUntil = time.Now().Add(leaseDuration)
+	}
+	if wasRunning {
+		if err := m.launchLocked(current); err != nil {
+			current.instance = oldInstance
+			current.runtime = oldRuntime
+			current.explicitStop = false
+			_ = m.launchLocked(current)
+			return model.Instance{}, &ManagerError{
+				Code:    "configuration_start_failed",
+				Message: "Spare could not start the new configuration.",
+				Hint:    err.Error() + " The previous configuration was restored.",
+			}
+		}
+	} else {
+		m.persistLocked(current)
+	}
+	m.eventLocked(current, "info", "instance_configured", m.title(candidate.RecipeID)+" configuration was updated.", map[string]any{
+		"port": port,
+	})
+	return m.decorate(current.instance), nil
+}
+
 func (m *Manager) Start(id string) (model.Instance, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -344,6 +642,29 @@ func (m *Manager) Heartbeat(id string) error {
 	}
 	current.leaseUntil = time.Now().Add(leaseDuration)
 	return nil
+}
+
+func (m *Manager) Promote(id string) (model.Instance, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current, ok := m.workers[id]
+	if !ok || current.instance.Mode != model.ModeTemporary {
+		return model.Instance{}, &ManagerError{
+			Code:    "temporary_instance_not_found",
+			Message: "The temporary recipe is no longer running.",
+			Hint:    "Choose the recipe again and select Keep running after login.",
+		}
+	}
+	current.instance.Mode = model.ModeInstalled
+	current.leaseUntil = time.Time{}
+	current.instance.UpdatedAt = time.Now().UTC()
+	if err := m.store.PutInstance(context.Background(), current.instance); err != nil {
+		current.instance.Mode = model.ModeTemporary
+		current.leaseUntil = time.Now().Add(leaseDuration)
+		return model.Instance{}, err
+	}
+	m.eventLocked(current, "info", "instance_promoted", m.title(current.instance.RecipeID)+" will keep running after login.", nil)
+	return m.decorate(current.instance), nil
 }
 
 func (m *Manager) Remove(id string) error {
@@ -541,22 +862,7 @@ func (m *Manager) monitor(id string, generation uint64, healthPort int) {
 				return
 			}
 			if err == nil {
-				current.healthFails = 0
-				current.instance.StorageAvailableBytes = snapshot.StorageAvailableBytes
-				current.instance.ItemCount = snapshot.ItemCount
-				if !current.healthyBefore {
-					now := time.Now().UTC()
-					current.healthyBefore = true
-					current.instance.Status = model.StatusHealthy
-					current.instance.Problem = nil
-					current.instance.StartedAt = &now
-					current.instance.UpdatedAt = now
-					m.persistLocked(current)
-					if current.mdns == nil {
-						current.mdns, _ = discovery.Advertise(m.machine.Hostname, current.instance.Port)
-					}
-					m.eventLocked(current, "info", "instance_healthy", m.title(current.instance.RecipeID)+" is ready.", nil)
-				}
+				m.applyHealthSnapshotLocked(current, snapshot)
 				m.mu.Unlock()
 				continue
 			}
@@ -578,6 +884,56 @@ func (m *Manager) monitor(id string, generation uint64, healthPort int) {
 			}
 			m.mu.Unlock()
 		}
+	}
+}
+
+func (m *Manager) applyHealthSnapshotLocked(current *worker, snapshot health.Snapshot) {
+	previousItemCount := current.instance.ItemCount
+	current.healthFails = 0
+	current.instance.StorageAvailableBytes = snapshot.StorageAvailableBytes
+	current.instance.ItemCount = snapshot.ItemCount
+	if current.healthyBefore && current.instance.RecipeID == model.RecipeDrop &&
+		snapshot.ItemCount > previousItemCount {
+		count := snapshot.ItemCount - previousItemCount
+		message := "Drop received a file."
+		if snapshot.LatestItem != "" {
+			message = snapshot.LatestItem + " was received."
+		}
+		if count > 1 {
+			message = fmt.Sprintf("Drop received %d files.", count)
+		}
+		m.eventLocked(current, "info", "drop_file_received", message, map[string]any{
+			"count":    count,
+			"itemName": snapshot.LatestItem,
+		})
+	}
+	if current.healthyBefore && current.instance.RecipeID == model.RecipeHook &&
+		snapshot.ItemCount > previousItemCount {
+		count := snapshot.ItemCount - previousItemCount
+		message := "Hook captured a request."
+		if snapshot.LatestItem != "" {
+			message = snapshot.LatestItem + " was captured."
+		}
+		if count > 1 {
+			message = fmt.Sprintf("Hook captured %d requests.", count)
+		}
+		m.eventLocked(current, "info", "hook_request_captured", message, map[string]any{
+			"count":   count,
+			"request": snapshot.LatestItem,
+		})
+	}
+	if !current.healthyBefore {
+		now := time.Now().UTC()
+		current.healthyBefore = true
+		current.instance.Status = model.StatusHealthy
+		current.instance.Problem = nil
+		current.instance.StartedAt = &now
+		current.instance.UpdatedAt = now
+		m.persistLocked(current)
+		if current.mdns == nil {
+			current.mdns, _ = discovery.Advertise(m.machine.Hostname, current.instance.Port)
+		}
+		m.eventLocked(current, "info", "instance_healthy", m.title(current.instance.RecipeID)+" is ready.", nil)
 	}
 }
 
@@ -611,7 +967,7 @@ func (m *Manager) expireLeases(now time.Time) {
 			InstanceID: id,
 			Level:      "info",
 			Kind:       "temporary_instance_expired",
-			Message:    "Temporary " + title + " stopped after its terminal closed.",
+			Message:    "Temporary " + title + " stopped after its lease owner closed.",
 		})
 	}
 }
@@ -737,4 +1093,69 @@ func restartDelay(crashCount int) time.Duration {
 		return 30 * time.Second
 	}
 	return delay
+}
+
+func configInt64(value any) int64 {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed)
+	case int64:
+		return typed
+	case float64:
+		return int64(typed)
+	case json.Number:
+		result, _ := typed.Int64()
+		return result
+	default:
+		return 0
+	}
+}
+
+func copyDropFile(root, source string) (string, error) {
+	input, err := os.Open(source)
+	if err != nil {
+		return "", err
+	}
+	defer input.Close()
+	temporary, err := os.CreateTemp(root, ".spare-drop-*")
+	if err != nil {
+		return "", err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if _, err := io.Copy(temporary, input); err != nil {
+		_ = temporary.Close()
+		return "", err
+	}
+	if err := temporary.Chmod(0o600); err != nil {
+		_ = temporary.Close()
+		return "", err
+	}
+	if err := temporary.Close(); err != nil {
+		return "", err
+	}
+
+	base := filepath.Base(source)
+	extension := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, extension)
+	for suffix := 0; suffix < 10_000; suffix++ {
+		name := base
+		if suffix > 0 {
+			name = fmt.Sprintf("%s (%d)%s", stem, suffix, extension)
+		}
+		target := filepath.Join(root, name)
+		if err := os.Link(temporaryPath, target); err == nil {
+			return name, nil
+		} else if !errors.Is(err, os.ErrExist) {
+			return "", err
+		}
+	}
+	return "", errors.New("too many files use this name")
+}
+
+func plural(count int, singular, multiple string) string {
+	if count == 1 {
+		return singular
+	}
+	return multiple
 }

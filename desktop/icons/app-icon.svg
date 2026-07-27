@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Spare</title>
+  <rect width="512" height="512" rx="112" fill="#173d2c"/>
+  <path fill="#f5f7f4" d="M149 160c0-39 32-71 71-71h150v74H224v56h83c39 0 71 32 71 71v62c0 39-32 71-71 71H142v-74h161v-56h-83c-39 0-71-32-71-71v-62Z"/>
+</svg>

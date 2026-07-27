@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -150,8 +151,103 @@ func TestAPITokenAndSingleUseBrowserSession(t *testing.T) {
 		t.Fatalf("error code = %q", envelope.Error.Code)
 	}
 
+	desktopOnly, _ := http.NewRequest(
+		http.MethodPost,
+		server.URL+"/api/v1/desktop/drop-files",
+		strings.NewReader(`{"instanceId":"drop","paths":["/tmp/example"]}`),
+	)
+	desktopOnly.AddCookie(cookies[0])
+	response, err = http.DefaultClient.Do(desktopOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("browser session accessed desktop filesystem API: %d", response.StatusCode)
+	}
+	envelope = model.ErrorEnvelope{}
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if envelope.Error.Code != "desktop_only" {
+		t.Fatalf("desktop-only error code = %q", envelope.Error.Code)
+	}
+
+	localOnly, _ := http.NewRequest(
+		http.MethodPost,
+		server.URL+"/api/v1/instances",
+		strings.NewReader(`{"recipeId":"site","mode":"installed","config":{"path":"/tmp"},"portMode":"auto","port":0}`),
+	)
+	localOnly.AddCookie(cookies[0])
+	localOnly.Header.Set("Origin", server.URL)
+	response, err = http.DefaultClient.Do(localOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("browser session installed a recipe: %d", response.StatusCode)
+	}
+	envelope = model.ErrorEnvelope{}
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if envelope.Error.Code != "local_user_required" {
+		t.Fatalf("local-only error code = %q", envelope.Error.Code)
+	}
+
 	parsed, _ := url.Parse(server.URL)
 	if strings.Contains(created.URL, "secret-token") || !strings.Contains(created.URL, parsed.Host) {
 		t.Fatalf("browser URL leaked the API token or used the wrong host: %s", created.URL)
+	}
+
+	streamContext, cancelStream := context.WithCancel(context.Background())
+	defer cancelStream()
+	received := make(chan model.Event, 1)
+	streamErrors := make(chan error, 1)
+	go func() {
+		streamErrors <- NewClient(server.URL, "secret-token").StreamActivity(
+			streamContext,
+			func(event model.Event) {
+				select {
+				case received <- event:
+				default:
+				}
+			},
+		)
+	}()
+
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	eventTicker := time.NewTicker(25 * time.Millisecond)
+	defer eventTicker.Stop()
+	for {
+		select {
+		case <-eventTicker.C:
+			if err := store.AddEvent(context.Background(), model.Event{
+				Level:   "info",
+				Kind:    "drop_file_received",
+				Message: "report.pdf was received.",
+			}); err != nil {
+				t.Fatal(err)
+			}
+		case event := <-received:
+			if event.Kind != "drop_file_received" || event.ID == 0 {
+				t.Fatalf("unexpected streamed event: %#v", event)
+			}
+			cancelStream()
+			select {
+			case err := <-streamErrors:
+				if err != nil && !errors.Is(err, context.Canceled) {
+					t.Fatalf("stream returned %v", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("activity stream did not stop after cancellation")
+			}
+			return
+		case <-deadline.C:
+			cancelStream()
+			t.Fatal("timed out waiting for streamed activity")
+		}
 	}
 }

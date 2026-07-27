@@ -1,6 +1,13 @@
 $ErrorActionPreference = "Stop"
 
-$Version = if ($env:SPARE_VERSION) { $env:SPARE_VERSION } else { "0.1.0" }
+$BundledVersionFile = Join-Path $PSScriptRoot "VERSION"
+$Version = if ($env:SPARE_VERSION) {
+  $env:SPARE_VERSION
+} elseif (Test-Path $BundledVersionFile) {
+  (Get-Content $BundledVersionFile -Raw).Trim()
+} else {
+  "0.1.0"
+}
 $InstallDir = if ($env:SPARE_INSTALL_DIR) { $env:SPARE_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA "Spare\bin" }
 $BaseUrl = if ($env:SPARE_RELEASE_BASE_URL) { $env:SPARE_RELEASE_BASE_URL } else { "https://github.com/spare-run/spare/releases/download/v$Version" }
 
@@ -8,10 +15,24 @@ New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $LocalSpare = Join-Path $ScriptDir "spare.exe"
 $LocalDaemon = Join-Path $ScriptDir "spared.exe"
+$RecipeDir = Join-Path $env:LOCALAPPDATA "Spare\recipes"
+
+function Install-DefaultRecipes {
+  param([string]$Source)
+
+  New-Item -ItemType Directory -Force -Path $RecipeDir | Out-Null
+  foreach ($RecipeId in @("site", "drop", "hook")) {
+    $RecipePackage = Join-Path $Source ("{0}_{1}.sp" -f $RecipeId, $Version)
+    if (-not (Test-Path $RecipePackage)) { throw "The release archive is missing $RecipePackage." }
+    Copy-Item $RecipePackage (Join-Path $RecipeDir ("{0}_{1}.sp" -f $RecipeId, $Version)) -Force
+  }
+}
 
 if ((Test-Path $LocalSpare) -and (Test-Path $LocalDaemon)) {
   Copy-Item $LocalSpare (Join-Path $InstallDir "spare.exe") -Force
   Copy-Item $LocalDaemon (Join-Path $InstallDir "spared.exe") -Force
+  $RecipeSource = Join-Path $ScriptDir "recipes"
+  Install-DefaultRecipes $RecipeSource
 } else {
   $Arch = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq "Arm64") { "arm64" } else { "amd64" }
   $Archive = "spare_${Version}_windows_${Arch}.zip"
@@ -28,10 +49,14 @@ if ((Test-Path $LocalSpare) -and (Test-Path $LocalDaemon)) {
     Expand-Archive (Join-Path $TempDir $Archive) -DestinationPath $TempDir -Force
     Copy-Item (Join-Path $TempDir "spare.exe") (Join-Path $InstallDir "spare.exe") -Force
     Copy-Item (Join-Path $TempDir "spared.exe") (Join-Path $InstallDir "spared.exe") -Force
+    $RecipeSource = Join-Path $TempDir "recipes"
+    Install-DefaultRecipes $RecipeSource
   } finally {
     Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
   }
 }
+
+Write-Output "Installed the default recipe packages in $RecipeDir."
 
 $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if (($UserPath -split ";") -notcontains $InstallDir) {

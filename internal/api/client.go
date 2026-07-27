@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spare-run/spare/internal/model"
@@ -122,6 +124,30 @@ func (c *Client) Heartbeat(ctx context.Context, id string) error {
 	return c.do(ctx, http.MethodPost, "/api/v1/instances/"+id+"/heartbeat", nil, nil)
 }
 
+func (c *Client) Promote(ctx context.Context, id string) (model.Instance, error) {
+	var result model.Instance
+	err := c.do(ctx, http.MethodPost, "/api/v1/instances/"+id+"/promote", nil, &result)
+	return result, err
+}
+
+func (c *Client) Configure(
+	ctx context.Context,
+	id,
+	recipeID string,
+	config map[string]any,
+	portMode string,
+	port int,
+) (model.Instance, error) {
+	var result model.Instance
+	err := c.do(ctx, http.MethodPost, "/api/v1/instances/"+id+"/configure", map[string]any{
+		"recipeId": recipeID,
+		"config":   config,
+		"portMode": portMode,
+		"port":     port,
+	}, &result)
+	return result, err
+}
+
 func (c *Client) Remove(ctx context.Context, id string) error {
 	return c.do(ctx, http.MethodDelete, "/api/v1/instances/"+id, nil, nil)
 }
@@ -138,6 +164,67 @@ func (c *Client) BrowserSession(ctx context.Context) (string, error) {
 	}
 	err := c.do(ctx, http.MethodPost, "/api/v1/browser-sessions", nil, &result)
 	return result.URL, err
+}
+
+func (c *Client) ExportBackup(ctx context.Context, instanceID, destination string) error {
+	return c.do(ctx, http.MethodPost, "/api/v1/desktop/backups/export", map[string]any{
+		"instanceId":  instanceID,
+		"destination": destination,
+	}, nil)
+}
+
+func (c *Client) RestoreBackup(ctx context.Context, source, destination string) (model.Instance, error) {
+	var result model.Instance
+	err := c.do(ctx, http.MethodPost, "/api/v1/desktop/backups/restore", map[string]any{
+		"source":      source,
+		"destination": destination,
+	}, &result)
+	return result, err
+}
+
+func (c *Client) AddDropFiles(ctx context.Context, instanceID string, paths []string) ([]string, error) {
+	var result struct {
+		Names []string `json:"names"`
+	}
+	err := c.do(ctx, http.MethodPost, "/api/v1/desktop/drop-files", map[string]any{
+		"instanceId": instanceID,
+		"paths":      paths,
+	}, &result)
+	return result.Names, err
+}
+
+// StreamActivity receives committed events until ctx is cancelled. Callers
+// should reconnect and refresh /events when this stream returns.
+func (c *Client) StreamActivity(ctx context.Context, receive func(model.Event)) error {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/activity/stream", nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Authorization", "Bearer "+c.token)
+	request.Header.Set("Accept", "text/event-stream")
+	// Activity is a long-lived response. The bounded client used for ordinary
+	// API calls would otherwise tear down a healthy stream every ten seconds.
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("Spare returned HTTP %d", response.StatusCode)
+	}
+	scanner := bufio.NewScanner(response.Body)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		var event model.Event
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event); err == nil {
+			receive(event)
+		}
+	}
+	return scanner.Err()
 }
 
 func (c *Client) do(ctx context.Context, method, route string, body any, output any) error {

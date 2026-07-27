@@ -25,8 +25,9 @@ make smoke
 Expected results:
 
 - `make test` builds the dashboard, runs every Go test, and runs `go vet`.
-- `make test-ui` runs six Chromium tests, including axe accessibility checks,
-  keyboard access, 320 px reflow, and 200% text scaling.
+- `make test-ui` runs seven Chromium tests, including the desktop first-launch
+  Drop flow, axe accessibility checks, keyboard access, 320 px reflow, and
+  200% text scaling.
 - `make smoke` builds Spare and exercises all three recipes through the shared
   runtime. It tests Site serving and worker recovery, Drop upload/download,
   Hook capture/replay, stop/start, removal, uninstall, backup/restore, and
@@ -48,6 +49,103 @@ shasum -a 256 -c checksums.txt
 ```
 
 On Linux, use `sha256sum -c checksums.txt` if `shasum` is unavailable.
+
+## Test the macOS Desktop Alpha
+
+Build and verify the archive for the current Mac:
+
+```bash
+make desktop-package VERSION=0.1.0
+cd dist/desktop
+shasum -a 256 -c checksums.txt
+unzip spare-desktop_0.1.0_darwin_$(test "$(uname -m)" = x86_64 && echo amd64 || echo arm64).zip
+./install.sh
+```
+
+Use `make desktop-package-amd64` explicitly for Intel and
+`make desktop-package-arm64` for Apple Silicon. On the matching Mac, verify
+this complete path:
+
+1. Spare opens without running `spare init`.
+2. The first screen shows the machine profile and **Try Drop**.
+3. The native folder picker selects a destination containing spaces or
+   non-ASCII characters.
+4. **Start Drop** produces a ready status, LAN address, and QR code.
+5. A phone on the same network uploads a file.
+6. Home updates the received-file count and Activity names the received file.
+7. A native notification appears when notifications are enabled.
+8. Menu-bar Open, Show QR, Pause, Start, Activity, and Open Spare actions work.
+9. Closing the window leaves the menu-bar process active.
+10. Quitting a temporary Drop offers stop, promote, and cancel choices.
+11. An installed Drop returns after logging out and back in.
+12. Disabling **Keep installed recipes running after login** prevents that
+    automatic restore while preserving the installed configuration.
+13. Uninstall removes the app, daemon service, desktop login item, and Spare
+    state while leaving every received file unchanged.
+14. Drag regular files onto an active Drop and confirm the daemon copies them
+    with collision-safe names and updates Activity.
+15. Drag a folder onto an idle Spare and confirm Site setup opens with the
+    canonical folder selected.
+16. Drag a `.sp` package and confirm only the safe package viewer opens.
+17. Export a backup in Settings, remove the current job, drag the backup into
+    Spare, restore it to an empty folder, and confirm the installed state.
+18. Configure the active recipe with another folder and confirm the former
+    folder remains unchanged.
+19. In Settings, select **Open remote dashboard** and confirm the browser
+    receives a working single-use session without a bearer token in its URL.
+20. In **Recipe storage**, select **Show selected folder**, then **Choose
+    another folder**, and confirm both actions stay on the local desktop
+    surface.
+21. Receive a Drop file, select **Show file** on its activity entry, and
+    confirm the operating system reveals that exact file. Replace it with a
+    symlink outside the Drop folder and confirm Spare refuses to reveal it.
+22. Disable only Hook notifications and confirm Drop notifications remain
+    enabled.
+
+The automated desktop test uses the same React surface with a bounded Wails
+bridge mock. Native folder dialogs, menu-bar interaction, notifications,
+LaunchAgents, login restart, and Finder removal still require this hands-on
+macOS pass.
+
+## Test the Windows Desktop Alpha
+
+Build the archive and verify its checksum:
+
+```bash
+make desktop-windows-package VERSION=0.1.0
+cd dist/desktop
+shasum -a 256 -c checksums.txt
+```
+
+In a clean Windows 11 amd64 VM, extract
+`spare-desktop_0.1.0_windows_amd64.zip`, run `install.ps1`, and repeat the
+complete desktop path above. Also verify:
+
+- `Spare.exe` and `spared.exe` are GUI-subsystem executables while
+  `bin\spare.exe` remains a console CLI.
+- The Win32 tray opens, shows current status, opens the recipe and QR view,
+  pauses/starts the recipe, opens Activity, and quits.
+- All three startup choices remain independent after logoff and login.
+- `uninstall.ps1` removes the application, user PATH entry, scheduled task,
+  and file association without deleting selected folders.
+
+Cross-compilation and archive inspection do not replace this native pass.
+
+## Test the Linux Desktop Alpha
+
+On Ubuntu or Debian, install the native build dependencies listed in
+[Use Spare Desktop](DESKTOP.md), then run:
+
+```bash
+make desktop-linux-package VERSION=0.1.0
+cd dist/desktop
+shasum -a 256 -c checksums.txt
+```
+
+Extract the matching `linux_amd64` or `linux_arm64` archive and run
+`./install.sh`. Repeat the desktop path above and verify the
+GTK/AppIndicator tray under both X11 and Wayland sessions. Run the same
+acceptance flow on Ubuntu 22.04+, Debian 12+, and an ARM64 Linux computer.
 
 ## Test a temporary Site
 

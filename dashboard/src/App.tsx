@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { loadDashboard, startInstance, stopInstance } from "./api";
+import { DesktopApp } from "./DesktopApp";
+import { desktopBridge } from "./desktop";
 import type { Event, Instance, Machine, Recipe } from "./types";
 
 type DashboardState = {
@@ -20,6 +22,14 @@ const statusLabels: Record<Instance["status"], string> = {
 };
 
 export function App() {
+  const bridge = desktopBridge();
+  if (bridge) {
+    return <DesktopApp bridge={bridge} />;
+  }
+  return <BrowserDashboard />;
+}
+
+function BrowserDashboard() {
   const [data, setData] = useState<DashboardState>({
     recipes: [],
     instances: [],
@@ -50,7 +60,7 @@ export function App() {
         setAnnouncement(
           current
             ? `${currentRecipe?.title ?? current.recipeId} status changed to ${statusLabels[current.status]}.`
-            : "This computer is ready for a recipe."
+            : `${next.machine?.hostname ?? "The Spare computer"} is ready for a recipe.`
         );
       }
       previousStatus.current = status;
@@ -140,7 +150,9 @@ export function App() {
             Spare
           </div>
           {data.machine && (
-            <p className="machine-name">{data.machine.hostname}</p>
+            <p className="machine-name">
+              Remote dashboard · {data.machine.hostname}
+            </p>
           )}
         </div>
         <nav className="section-nav" aria-label="Dashboard sections">
@@ -222,10 +234,10 @@ function InstanceView({
           <p className="eyebrow">
             <StatusIcon tone="ready" /> Ready
           </p>
-          <h1>This computer is ready</h1>
+          <h1>{machine?.hostname ?? "This Spare computer"} is ready</h1>
           <p className="lede">
-            Choose Site to share a local website, Drop to receive files, or
-            Hook to inspect webhooks from nearby devices.
+            Use the Spare desktop app or CLI on that computer to choose Site,
+            Drop, or Hook.
           </p>
         </div>
         <div className="empty-actions" aria-label="Try a recipe">
@@ -262,10 +274,10 @@ function InstanceView({
         <p className={`eyebrow status-${tone}`}>
           <StatusIcon tone={tone} /> {statusLabels[instance.status]}
         </p>
-        <h1>This computer is a {title}</h1>
+        <h1>{machine?.hostname ?? "This Spare computer"} is a {title}</h1>
         <p className="lede">
           {instance.status === "healthy"
-            ? readyMessage(instance.recipeId)
+            ? remoteReadyMessage(instance, machine)
             : instance.problem?.summary ??
               `Spare is preparing ${title} for this computer and the local network.`}
         </p>
@@ -305,6 +317,10 @@ function InstanceView({
             </button>
           )}
         </div>
+        <p className="remote-notice">
+          You are controlling {machine?.hostname ?? "this Spare computer"}.
+          Folder selection, installation, and removal stay on that computer.
+        </p>
       </div>
 
       {instance.recipeId === "drop" && (
@@ -633,14 +649,17 @@ function StatusIcon({ tone }: { tone: string }) {
   return <span className={`status-dot status-dot-${tone}`} aria-hidden="true" />;
 }
 
-function readyMessage(recipeID: string) {
-  switch (recipeID) {
+function remoteReadyMessage(instance: Instance, machine?: Machine) {
+  const host = machine?.hostname ?? "the Spare computer";
+  switch (instance.recipeId) {
     case "drop":
-      return "Nearby devices can upload and download files through your selected folder.";
+      return instance.dataPath
+        ? `Files are being saved to ${instance.dataPath} on ${host}.`
+        : `Nearby devices can upload and download files through ${host}.`;
     case "hook":
-      return "Hook is ready to receive, inspect, and replay webhook requests.";
+      return `Hook on ${host} is ready to receive, inspect, and replay webhook requests.`;
     default:
-      return "Your folder is available as a read-only website on this computer and the local network.";
+      return `The selected folder on ${host} is available as a read-only local website.`;
   }
 }
 

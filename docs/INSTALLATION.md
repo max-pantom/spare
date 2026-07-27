@@ -6,6 +6,58 @@ computer where you can safely remove it.
 Spare installs for the current user. It does not require administrator access,
 open firewall ports, or start before login.
 
+## Choose Desktop or CLI
+
+Spare Desktop is the default local experience. Each desktop archive contains
+the application, daemon, CLI, built-in recipes, and uninstaller. Choose the
+macOS package matching the processor:
+
+```text
+Intel Mac:         spare-desktop_0.1.0_darwin_amd64.zip
+Apple Silicon Mac: spare-desktop_0.1.0_darwin_arm64.zip
+```
+
+Build and install it:
+
+```bash
+make desktop-package VERSION=0.1.0
+cd dist/desktop
+shasum -a 256 -c checksums.txt
+unzip spare-desktop_0.1.0_darwin_$(test "$(uname -m)" = x86_64 && echo amd64 || echo arm64).zip
+./install.sh
+```
+
+`make desktop-package` defaults to the current Mac. You can instead run
+`make desktop-package-amd64` for Intel or `make desktop-package-arm64` for
+Apple Silicon.
+
+Spare opens immediately and initializes automatically; `spare init` is not
+required. See [Use Spare Desktop](DESKTOP.md).
+
+The desktop bundle is ad-hoc signed for local executable integrity. It has no
+Developer ID signature and is not notarized.
+
+A structurally verified, unsigned Windows amd64 engineering archive is also
+created with:
+
+```bash
+make desktop-windows-package VERSION=0.1.0
+```
+
+Extract `spare-desktop_0.1.0_windows_amd64.zip` on Windows 11 and run its
+`install.ps1`. It installs per user under
+`%LOCALAPPDATA%\Programs\Spare`, opens the Wails app, and provides a Win32
+system tray.
+
+Linux desktop archives are built natively with
+`make desktop-linux-package VERSION=0.1.0` after installing GTK3,
+WebKitGTK, and Ayatana AppIndicator development packages. See
+[Use Spare Desktop](DESKTOP.md) for exact dependencies and current native
+acceptance gates.
+
+Use the CLI archives below for ARM Windows, headless machines, Raspberry Pi,
+or CLI-focused development.
+
 ## Choose the correct archive
 
 | System | Intel/AMD 64-bit | ARM 64-bit |
@@ -16,9 +68,11 @@ open firewall ports, or start before login.
 | 64-bit Raspberry Pi OS | — | `spare_0.1.0_linux_arm64.tar.gz` |
 
 Release files built from this repository are written to `dist/releases`.
-That directory also contains the optional `site_0.1.0.sp`,
-`drop_0.1.0.sp`, and `hook_0.1.0.sp` packages. Verify every selected artifact
-against `dist/releases/checksums.txt` before installing or inspecting it.
+Every platform archive includes the default `site_0.1.0.sp`,
+`drop_0.1.0.sp`, and `hook_0.1.0.sp` packages in its `recipes` directory.
+They are also published separately for direct download. Verify every selected
+artifact against `dist/releases/checksums.txt` before installing or inspecting
+it.
 
 ## Install on macOS
 
@@ -59,6 +113,9 @@ registers it for `.sp` files. Double-click a recipe package to inspect it, or
 run `spare view package.sp`. The browser viewer is local to this Mac and does
 not require the Spare daemon.
 
+The bundled packages remain available after installation in
+`~/Library/Application Support/Spare/recipes`.
+
 ## Install on Linux or Raspberry Pi
 
 Extract the matching archive and run its installer:
@@ -87,6 +144,9 @@ When the desktop MIME tools are available, the installer registers `.sp` as
 `application/vnd.spare.recipe+zip` and associates it with Spare Recipe Viewer.
 You can also run `spare view package.sp` directly.
 
+The bundled packages remain available after installation in
+`${XDG_STATE_HOME:-~/.local/state}/spare/recipes`.
+
 ## Install on Windows
 
 Extract the selected ZIP archive. Open PowerShell in the extracted directory
@@ -108,6 +168,9 @@ the archive checksum before approving it.
 The installer registers the per-user `Spare.Recipe` file type. If `.sp` does
 not already belong to another application, double-clicking it opens Spare
 Recipe Viewer. `spare view package.sp` always works from a terminal.
+
+The bundled packages remain available after installation in
+`%LOCALAPPDATA%\Spare\recipes`.
 
 ## Build from source
 
@@ -154,7 +217,7 @@ This computer is ready.
 
 ## State and service locations
 
-| System | State | Login service |
+| System | State and bundled recipes | Login service |
 | --- | --- | --- |
 | macOS | `~/Library/Application Support/Spare` | `~/Library/LaunchAgents/run.spare.spared.plist` |
 | Windows | `%LOCALAPPDATA%\Spare` | Scheduled Task named `Spare` |
