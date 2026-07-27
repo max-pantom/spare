@@ -12,7 +12,16 @@ import (
 	"time"
 )
 
-const maxPackageFileSize = 2 << 30
+const (
+	maxPackageFileSize = 2 << 30
+	maxPackageFiles    = 10_000
+)
+
+type PackageFile struct {
+	Name           string `json:"name"`
+	Size           uint64 `json:"size"`
+	CompressedSize uint64 `json:"compressedSize"`
+}
 
 func PackDirectory(source, destination string) error {
 	root, err := filepath.Abs(source)
@@ -153,6 +162,52 @@ func ReadFile(packagePath, name string) ([]byte, error) {
 		return data, nil
 	}
 	return nil, os.ErrNotExist
+}
+
+func ListFiles(packagePath string) ([]PackageFile, error) {
+	archive, err := zip.OpenReader(packagePath)
+	if err != nil {
+		return nil, err
+	}
+	defer archive.Close()
+	if len(archive.File) > maxPackageFiles {
+		return nil, fmt.Errorf("package contains more than %d files", maxPackageFiles)
+	}
+	files := make([]PackageFile, 0, len(archive.File))
+	seen := make(map[string]string, len(archive.File))
+	for _, file := range archive.File {
+		cleanName, err := cleanArchivePath(file.Name)
+		if err != nil {
+			return nil, err
+		}
+		key := strings.ToLower(cleanName)
+		if existing, ok := seen[key]; ok {
+			return nil, fmt.Errorf("package contains duplicate or case-conflicting paths: %s and %s", existing, cleanName)
+		}
+		seen[key] = cleanName
+		mode := file.FileInfo().Mode()
+		if mode&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("package contains a symlink: %s", file.Name)
+		}
+		if file.FileInfo().IsDir() {
+			continue
+		}
+		if !mode.IsRegular() {
+			return nil, fmt.Errorf("package contains a special file: %s", file.Name)
+		}
+		if file.UncompressedSize64 > maxPackageFileSize {
+			return nil, fmt.Errorf("package file is too large: %s", file.Name)
+		}
+		files = append(files, PackageFile{
+			Name:           cleanName,
+			Size:           file.UncompressedSize64,
+			CompressedSize: file.CompressedSize64,
+		})
+	}
+	sort.Slice(files, func(left, right int) bool {
+		return files[left].Name < files[right].Name
+	})
+	return files, nil
 }
 
 func Extract(packagePath, destination string) error {

@@ -46,6 +46,7 @@ spare/
 │   ├── permissions/            # Declared recipe permissions
 │   ├── profile/                # Machine metrics and capabilities
 │   ├── recipe/                 # Manifest and `.sp` package lifecycle
+│   ├── recipeview/             # Safe loopback `.sp` package browser
 │   ├── recipes/
 │   │   ├── drop/               # Browser file receiver
 │   │   ├── hook/               # Local webhook inbox

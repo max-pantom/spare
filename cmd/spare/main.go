@@ -28,6 +28,7 @@ import (
 	"github.com/spare-run/spare/internal/profile"
 	"github.com/spare-run/spare/internal/recipe"
 	"github.com/spare-run/spare/internal/recipes"
+	"github.com/spare-run/spare/internal/recipeview"
 	"github.com/spare-run/spare/internal/service"
 	"github.com/spare-run/spare/internal/state"
 	"github.com/spf13/cobra"
@@ -66,6 +67,7 @@ func (a *app) rootCommand() *cobra.Command {
 	command.AddCommand(
 		a.initCommand(),
 		a.recipeCommand(),
+		a.viewCommand(),
 		a.tryCommand(),
 		a.installCommand(),
 		a.statusCommand(),
@@ -79,6 +81,40 @@ func (a *app) rootCommand() *cobra.Command {
 		a.importCommand(),
 		a.uninstallCommand(),
 	)
+	return command
+}
+
+func (a *app) viewCommand() *cobra.Command {
+	var noOpen bool
+	command := &cobra.Command{
+		Use:   "view <package.sp>",
+		Short: "Open a recipe package in a safe local viewer",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(command *cobra.Command, args []string) error {
+			viewer, err := recipeview.New(args[0])
+			if err != nil {
+				return err
+			}
+			running, err := viewer.Start()
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(a.out, "Viewing %s\n%s\n\nClose the browser tab when you finish. Press Ctrl-C to stop the viewer now.\n",
+				viewer.Summary().FileName,
+				running.URL,
+			)
+			if !noOpen {
+				if err := openBrowser(running.URL); err != nil {
+					_ = running.Close()
+					return err
+				}
+			}
+			ctx, stop := signal.NotifyContext(command.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			return running.Wait(ctx)
+		},
+	}
+	command.Flags().BoolVar(&noOpen, "no-open", false, "print the viewer URL without opening a browser")
 	return command
 }
 

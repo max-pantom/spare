@@ -89,6 +89,7 @@ worker:
 spare recipe validate ./recipes/drop
 spare recipe pack ./recipes/drop
 spare recipe inspect drop.sp
+spare view drop.sp
 spare recipe validate ./recipes/hook
 ```
 
@@ -102,6 +103,8 @@ spare recipe validate ./recipes/hook
   symlinks, applies a per-file size limit, and resolves filename collisions.
 - Hook keeps the latest 50 requests in memory, caps bodies at 1 MB, rejects
   cross-origin browser replays, and does not follow replay redirects.
+- The `.sp` viewer binds to a random loopback port, validates every package
+  path, renders text as inert content, and does not preview executables.
 - Recipe web interfaces have no authentication or TLS in this preview. Anyone
   on the same reachable local network can open Site, send files to Drop, or
   inspect requests and initiate replays through Hook.

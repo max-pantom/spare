@@ -88,6 +88,7 @@ spare uninstall
 | `spare recipe validate <source>` | Validate a recipe directory, manifest, or `.sp` package |
 | `spare recipe pack <directory>` | Create a reproducible ZIP-compatible `.sp` package |
 | `spare recipe inspect <source>` | Print a validated manifest as JSON |
+| `spare view <package.sp>` | Open a validated package summary, file list, and safe previews in a local browser |
 | `spare try <recipe> [directory]` | Run a recipe while the CLI heartbeat remains active |
 | `spare install <recipe> --path <directory>` | Install one persistent recipe instance |
 | `spare status [--json]` | Show machine, recipe, instance, addresses, metrics, and problems |

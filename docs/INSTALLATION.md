@@ -54,6 +54,11 @@ The preview is not signed or notarized. macOS may block a downloaded build. For
 the safest development path, build it from source or approve only an archive
 whose checksum you have verified.
 
+The installer also creates `~/Applications/Spare Recipe Viewer.app` and
+registers it for `.sp` files. Double-click a recipe package to inspect it, or
+run `spare view package.sp`. The browser viewer is local to this Mac and does
+not require the Spare daemon.
+
 ## Install on Linux or Raspberry Pi
 
 Extract the matching archive and run its installer:
@@ -78,6 +83,10 @@ Add that line to your shell profile to keep it after reopening the terminal.
 Linux lingering is not enabled, so Spare starts after you log in and stops when
 the user service manager is no longer running.
 
+When the desktop MIME tools are available, the installer registers `.sp` as
+`application/vnd.spare.recipe+zip` and associates it with Spare Recipe Viewer.
+You can also run `spare view package.sp` directly.
+
 ## Install on Windows
 
 Extract the selected ZIP archive. Open PowerShell in the extracted directory
@@ -95,6 +104,10 @@ the `spare` command is not immediately available.
 
 The preview binaries are unsigned. Windows may show a security warning. Verify
 the archive checksum before approving it.
+
+The installer registers the per-user `Spare.Recipe` file type. If `.sp` does
+not already belong to another application, double-clicking it opens Spare
+Recipe Viewer. `spare view package.sp` always works from a terminal.
 
 ## Build from source
 

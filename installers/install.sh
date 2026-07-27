@@ -9,6 +9,17 @@ if [ "${1:-}" = "--uninstall" ]; then
   if command -v spare >/dev/null 2>&1; then
     spare uninstall --yes || true
   fi
+  data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}
+  rm -f "$data_home/applications/spare-recipe-viewer.desktop"
+  rm -f "$data_home/mime/packages/spare-recipe.xml"
+  viewer_app="$HOME/Applications/Spare Recipe Viewer.app"
+  if [ -d "$viewer_app" ]; then
+    launch_services="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+    if [ -x "$launch_services" ]; then
+      "$launch_services" -u "$viewer_app" >/dev/null 2>&1 || true
+    fi
+    rm -rf "$viewer_app"
+  fi
   rm -f "$INSTALL_DIR/spare" "$INSTALL_DIR/spared"
   echo "Spare binaries were removed."
   exit 0
@@ -57,10 +68,82 @@ fi
 
 chmod 755 "$INSTALL_DIR/spare" "$INSTALL_DIR/spared"
 
+if [ "$target_os" = "linux" ]; then
+  data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}
+  mime_packages="$data_home/mime/packages"
+  applications="$data_home/applications"
+  mkdir -p "$mime_packages" "$applications"
+  cat > "$mime_packages/spare-recipe.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/vnd.spare.recipe+zip">
+    <comment>Spare recipe package</comment>
+    <glob pattern="*.sp"/>
+  </mime-type>
+</mime-info>
+EOF
+  cat > "$applications/spare-recipe-viewer.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Spare Recipe Viewer
+Comment=Inspect a Spare recipe package
+Exec="$INSTALL_DIR/spare" view %f
+Terminal=false
+MimeType=application/vnd.spare.recipe+zip;
+Categories=Utility;Development;
+NoDisplay=true
+EOF
+  if command -v update-mime-database >/dev/null 2>&1; then
+    update-mime-database "$data_home/mime" >/dev/null 2>&1 || true
+  fi
+  if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$applications" >/dev/null 2>&1 || true
+  fi
+  if command -v xdg-mime >/dev/null 2>&1; then
+    xdg-mime default spare-recipe-viewer.desktop application/vnd.spare.recipe+zip >/dev/null 2>&1 || true
+  fi
+  echo "Registered .sp files with Spare Recipe Viewer."
+fi
+
+if [ "$target_os" = "darwin" ] && command -v osacompile >/dev/null 2>&1 && command -v plutil >/dev/null 2>&1; then
+  viewer_app="$HOME/Applications/Spare Recipe Viewer.app"
+  viewer_source=$(mktemp)
+  escaped_spare=$(printf '%s' "$INSTALL_DIR/spare" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  {
+    printf 'on open recipeFiles\n'
+    printf '  repeat with recipeFile in recipeFiles\n'
+    printf '    set recipePath to POSIX path of recipeFile\n'
+    printf '    do shell script ((quoted form of "%s") & " view " & (quoted form of recipePath) & " >/dev/null 2>&1 &")\n' "$escaped_spare"
+    printf '  end repeat\n'
+    printf 'end open\n'
+    printf 'on run\n'
+    printf '  display dialog "Open a .sp file to inspect it with Spare." buttons {"OK"} default button "OK"\n'
+    printf 'end run\n'
+  } > "$viewer_source"
+  mkdir -p "$(dirname "$viewer_app")"
+  rm -rf "$viewer_app"
+  if osacompile -o "$viewer_app" "$viewer_source" >/dev/null 2>&1; then
+    viewer_plist="$viewer_app/Contents/Info.plist"
+    plutil -replace CFBundleIdentifier -string "run.spare.recipe-viewer" "$viewer_plist" >/dev/null 2>&1 ||
+      plutil -insert CFBundleIdentifier -string "run.spare.recipe-viewer" "$viewer_plist"
+    plutil -replace CFBundleName -string "Spare Recipe Viewer" "$viewer_plist" >/dev/null 2>&1 ||
+      plutil -insert CFBundleName -string "Spare Recipe Viewer" "$viewer_plist"
+    plutil -remove CFBundleDocumentTypes "$viewer_plist" >/dev/null 2>&1 || true
+    plutil -insert CFBundleDocumentTypes -json '[{"CFBundleTypeName":"Spare recipe package","CFBundleTypeExtensions":["sp"],"CFBundleTypeRole":"Viewer","LSHandlerRank":"Owner"}]' "$viewer_plist"
+    launch_services="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+    if [ -x "$launch_services" ]; then
+      "$launch_services" -f "$viewer_app" >/dev/null 2>&1 || true
+    fi
+    echo "Registered .sp files with Spare Recipe Viewer."
+  else
+    rm -rf "$viewer_app"
+  fi
+  rm -f "$viewer_source"
+fi
+
 case ":$PATH:" in
   *":$INSTALL_DIR:"*) ;;
   *) echo "Add $INSTALL_DIR to PATH before running Spare." ;;
 esac
 
 "$INSTALL_DIR/spare" init
-

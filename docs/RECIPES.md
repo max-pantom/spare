@@ -62,6 +62,22 @@ Inspect its normalized manifest:
 spare recipe inspect drop.sp
 ```
 
+Open the complete package in a local browser:
+
+```bash
+spare view drop.sp
+```
+
+The viewer shows the validated manifest, compatibility, declared permissions,
+configuration fields, package checksum, compressed and unpacked sizes, and
+every packaged path. Text files are rendered as inert plain text. PNG, JPEG,
+GIF, and WebP files get constrained image previews. SVG, HTML, and scripts are
+shown only as text; executables, unknown formats, and files larger than 2 MB
+remain listed without being opened.
+
+The viewer listens only on a random loopback port. It stops on `Ctrl-C` or
+after the browser has stopped contacting it for two minutes.
+
 The packer sorts files, normalizes archive timestamps, and rejects symlinks and
 special files so the same source can produce reproducible package content.
 

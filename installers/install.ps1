@@ -39,5 +39,22 @@ if (($UserPath -split ";") -notcontains $InstallDir) {
   $env:Path = "$env:Path;$InstallDir"
 }
 
-& (Join-Path $InstallDir "spare.exe") init
+$SpareExe = Join-Path $InstallDir "spare.exe"
+$ClassesRoot = "HKCU:\Software\Classes"
+$ExtensionKey = Join-Path $ClassesRoot ".sp"
+$RecipeClass = Join-Path $ClassesRoot "Spare.Recipe"
+New-Item -Path $ExtensionKey -Force | Out-Null
+$CurrentAssociation = (Get-Item $ExtensionKey).GetValue("")
+if (-not $CurrentAssociation -or $CurrentAssociation -eq "Spare.Recipe") {
+  Set-Item -Path $ExtensionKey -Value "Spare.Recipe"
+}
+New-ItemProperty -Path $ExtensionKey -Name "Content Type" -Value "application/vnd.spare.recipe+zip" -PropertyType String -Force | Out-Null
+New-Item -Path $RecipeClass -Force | Out-Null
+Set-Item -Path $RecipeClass -Value "Spare recipe package"
+New-Item -Path (Join-Path $RecipeClass "DefaultIcon") -Force | Out-Null
+Set-Item -Path (Join-Path $RecipeClass "DefaultIcon") -Value "`"$SpareExe`",0"
+New-Item -Path (Join-Path $RecipeClass "shell\open\command") -Force | Out-Null
+Set-Item -Path (Join-Path $RecipeClass "shell\open\command") -Value "`"$SpareExe`" view `"%1`""
+Write-Output "Registered .sp files with Spare Recipe Viewer."
 
+& $SpareExe init

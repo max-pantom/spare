@@ -101,6 +101,19 @@ The `.sp` tooling:
 - Provides SHA-256 calculation and verification
 - Selects artifacts by explicit OS and architecture keys
 
+The `.sp` browser viewer:
+
+- Binds only to a random `127.0.0.1` port
+- Revalidates the manifest and every archive path before opening
+- Rejects traversal, symlinks, special files, duplicate paths, and
+  case-conflicting paths
+- Limits previews to 2 MB
+- Serves SVG, HTML, scripts, manifests, and documentation as inert plain text
+- Previews only PNG, JPEG, GIF, and WebP as images
+- Never previews packaged executables or unknown binary formats
+- Uses a restrictive content security policy and disables framing and objects
+- Stops on `Ctrl-C` or after two minutes without browser activity
+
 V1 runs only Site, Drop, and Hook implementations compiled into the daemon. A
 package cannot introduce a new executable command. External recipe execution
 remains blocked until artifact signatures, publisher trust, isolation, and

@@ -15,6 +15,8 @@ that remain deliberately outside the trusted built-in V1 boundary.
 - [x] Add typed configuration and declared permission schemas.
 - [x] Add capability-based machine and recipe compatibility.
 - [x] Parse, validate, inspect, and reproducibly pack `.sp` recipes.
+- [x] Add a safe local `.sp` viewer with package previews and per-user desktop
+  file associations.
 - [x] Add SHA-256 verification, safe extraction, platform artifact selection,
   caching paths, downloads, and atomic replacement.
 - [x] Add Drop with browser upload/download, progress, size limits, available

@@ -234,11 +234,24 @@ spare recipe pack ./recipes/site --output /tmp/site.sp
 spare recipe pack ./recipes/drop --output /tmp/drop.sp
 spare recipe pack ./recipes/hook --output /tmp/hook.sp
 spare recipe inspect /tmp/drop.sp
+spare view /tmp/drop.sp
 ```
 
 The package commands should work without installing a role. A package whose ID
 is not built into this release may validate, but `spare try` must refuse to
 execute it.
+
+In the package viewer, confirm:
+
+- Recipe overview, permissions, configuration, checksum, and file sizes appear.
+- Filtering the file list works with the keyboard.
+- `spare.yml`, `README.md`, and `icon.svg` render as plain text.
+- PNG, JPEG, GIF, and WebP package assets render as constrained images.
+- Executables and unknown binary files remain listed with “Preview
+  unavailable.”
+- Closing the tab lets the viewer process exit after its idle window.
+- Double-clicking a `.sp` package opens the viewer after installing Spare on
+  macOS, Windows, and a Linux desktop with MIME tools.
 
 ## Test export and restore
 

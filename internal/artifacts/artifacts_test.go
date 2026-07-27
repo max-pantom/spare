@@ -28,6 +28,13 @@ func TestPackReadAndExtract(t *testing.T) {
 	if string(data) != "schema: spare.recipe/v1\n" {
 		t.Fatalf("data = %q", data)
 	}
+	files, err := ListFiles(packagePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Name != "spare.yml" || files[0].Size != uint64(len(data)) {
+		t.Fatalf("files = %#v", files)
+	}
 	destination := t.TempDir()
 	if err := Extract(packagePath, destination); err != nil {
 		t.Fatal(err)
@@ -137,6 +144,36 @@ func TestExtractRejectsTraversal(t *testing.T) {
 	}
 	if err := Extract(packagePath, t.TempDir()); err == nil {
 		t.Fatal("expected traversal error")
+	}
+	if _, err := ListFiles(packagePath); err == nil {
+		t.Fatal("expected package listing to reject traversal")
+	}
+}
+
+func TestListFilesRejectsCaseConflictingPaths(t *testing.T) {
+	packagePath := filepath.Join(t.TempDir(), "duplicate.sp")
+	file, err := os.Create(packagePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive := zip.NewWriter(file)
+	for _, name := range []string{"README.md", "readme.md"} {
+		writer, err := archive.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := writer.Write([]byte(name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ListFiles(packagePath); err == nil {
+		t.Fatal("expected duplicate package paths to be rejected")
 	}
 }
 
