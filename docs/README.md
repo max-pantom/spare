@@ -1,6 +1,6 @@
 # Spare documentation
 
-These guides describe the `0.1.0` Hosted-mode engineering preview.
+These guides describe **Spare 0.1 Preview**, machine-readable version `0.1.0`.
 
 ## Start here
 

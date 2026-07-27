@@ -1,7 +1,7 @@
-# Install Spare
+# Install Spare 0.1 Preview
 
-Spare `0.1.0` is an unsigned engineering preview. Install it only on a test
-account or a computer where you can safely remove it.
+Spare 0.1 Preview (`0.1.0`) is unsigned. Install it only on a test account or a
+computer where you can safely remove it.
 
 Spare installs for the current user. It does not require administrator access,
 open firewall ports, or start before login.

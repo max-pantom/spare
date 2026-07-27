@@ -2,9 +2,9 @@
 
 **Spare gives any computer a job.**
 
-This repository contains the `0.1.0` Hosted-mode engineering preview. Spare
-profiles the computer and runs one trusted recipe temporarily or as a per-user
-background service.
+This repository contains **Spare 0.1 Preview**, machine-readable version
+`0.1.0`. Spare profiles the computer and runs one trusted recipe temporarily
+or as a per-user background service.
 
 Three built-in recipes prove the shared runtime:
 
