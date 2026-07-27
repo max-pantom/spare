@@ -1,9 +1,9 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  release:
+    types:
+      - published
 
 permissions:
   contents: write
@@ -24,7 +24,10 @@ jobs:
           cache-dependency-path: dashboard/package-lock.json
       - working-directory: dashboard
         run: npm ci
-      - run: make release VERSION="${GITHUB_REF_NAME#v}"
+      - env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: make release VERSION="${RELEASE_TAG#v}"
       - env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/releases/* --generate-notes --title "Spare $GITHUB_REF_NAME"
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" dist/releases/* --clobber
