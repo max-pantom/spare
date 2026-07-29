@@ -1529,6 +1529,7 @@ h1 {
   --desktop-warning: #f0b866;
   --desktop-danger: #ed777f;
   --desktop-stopped: #9b9b9b;
+  --desktop-body-font-size: 14px;
   --font-mono: "Geist Mono Variable", monospace;
 
   /* Desktop sidebar controls — edit these values to tune the navigation. */
@@ -1568,7 +1569,7 @@ h1 {
   font-family:
     "Inter Variable", Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont,
     "Segoe UI", sans-serif;
-  font-size: 0.75rem;
+  font-size: var(--desktop-body-font-size);
   font-weight: 400;
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;
@@ -1721,7 +1722,7 @@ h1 {
   inset-inline: 7rem;
   margin: 0;
   color: var(--desktop-text-faint);
-  font-size: 0.75rem;
+  font-size: var(--desktop-body-font-size);
   font-weight: 400;
   line-height: 1.25rem;
   text-align: center;
@@ -1981,7 +1982,7 @@ h1 {
 .desktop-service-card strong {
   display: block;
   color: var(--desktop-text);
-  font-size: 0.75rem;
+  font-size: var(--desktop-body-font-size);
   font-weight: 500;
   line-height: 1rem;
 }
@@ -1989,8 +1990,8 @@ h1 {
 .desktop-service-card p {
   margin: 0.125rem 0 0;
   color: var(--desktop-text-muted);
-  font-size: 0.75rem;
-  line-height: 1rem;
+  font-size: var(--desktop-body-font-size);
+  line-height: 1.4;
 }
 
 .desktop-error {
@@ -2030,7 +2031,7 @@ h1 {
   border: 0;
   border-radius: 0.625rem;
   padding-inline: 0.625rem;
-  font-size: 0.75rem;
+  font-size: var(--desktop-body-font-size);
   font-weight: 500;
   line-height: 1rem;
   white-space: nowrap;
@@ -2086,7 +2087,7 @@ h1 {
   min-height: 1rem;
   margin: 0;
   color: var(--desktop-text);
-  font-size: 0.75rem;
+  font-size: var(--desktop-body-font-size);
   font-weight: 400;
   line-height: 1rem;
 }
@@ -2094,7 +2095,7 @@ h1 {
 .desktop-overview .recovery {
   margin: 0.375rem 0 0;
   color: #ffd69b;
-  font-size: 0.75rem;
+  font-size: var(--desktop-body-font-size);
 }
 
 .desktop-toolbar {
@@ -2108,7 +2109,7 @@ h1 {
 
 .desktop-info-heading {
   margin: 0.875rem 0 0;
-  font-size: 0.75rem;
+  font-size: var(--desktop-body-font-size);
   font-weight: 500;
   letter-spacing: 0;
   line-height: 1rem;
@@ -2136,7 +2137,7 @@ h1 {
 .desktop-metrics dt,
 .machine-grid dt {
   color: var(--desktop-text-muted);
-  font-size: 0.75rem;
+  font-size: var(--desktop-body-font-size);
   font-weight: 400;
   line-height: 1rem;
 }
@@ -2146,7 +2147,7 @@ h1 {
   min-width: 0;
   margin: 0.125rem 0 0;
   color: var(--desktop-text);
-  font-size: 0.75rem;
+  font-size: var(--desktop-body-font-size);
   font-weight: 500;
   line-height: 1rem;
   text-overflow: ellipsis;
@@ -2260,14 +2261,14 @@ h1 {
 
 .desktop-share p {
   margin: 0.625rem 0 0;
-  font-size: 0.75rem;
+  font-size: var(--desktop-body-font-size);
   line-height: 1.55;
 }
 
 .desktop-share .text-button {
   min-height: 1.5rem;
   margin: 0.625rem 0 0 -0.625rem;
-  font-size: 0.75rem;
+  font-size: var(--desktop-body-font-size);
 }
 
 .desktop-qr {
@@ -2847,7 +2848,7 @@ h1 {
   padding: 0;
   background: transparent;
   color: var(--desktop-text);
-  font-size: 0.75rem;
+  font-size: var(--desktop-body-font-size);
   font-weight: 500;
   text-align: start;
   cursor: pointer;
@@ -2892,7 +2893,7 @@ h1 {
 .desktop-jobs-heading h1 {
   margin: 0;
   color: var(--desktop-text-muted);
-  font-size: 0.75rem;
+  font-size: var(--desktop-body-font-size);
   font-weight: 400;
   letter-spacing: 0;
   line-height: 1.25;
@@ -2994,7 +2995,7 @@ h1 {
     0 0 0 1px rgba(255, 255, 255, 0.025);
   -webkit-backdrop-filter: blur(107px);
   backdrop-filter: blur(107px);
-  font-size: 0.75rem;
+  font-size: var(--desktop-body-font-size);
   font-weight: 500;
   line-height: 1;
   cursor: pointer;
@@ -3013,9 +3014,9 @@ h1 {
   width: min(14.75rem, 100%);
   margin: 0;
   color: #fff;
-  font-size: 0.75rem;
+  font-size: var(--desktop-body-font-size);
   font-weight: 400;
-  line-height: 1;
+  line-height: 1.4;
   opacity: 0.6;
   text-wrap: pretty;
 }
@@ -3064,7 +3065,7 @@ h1 {
   background: #292929;
   color: var(--desktop-text-faint);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.025);
-  font-size: 0.75rem;
+  font-size: var(--desktop-body-font-size);
   font-weight: 400;
   line-height: 1;
   cursor: pointer;

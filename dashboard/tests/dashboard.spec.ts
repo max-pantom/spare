@@ -781,6 +781,9 @@ test("desktop first launch sets up Drop without the CLI", async ({ page }) => {
       page.locator(".desktop-root").evaluate((root) => {
         const styles = getComputedStyle(root);
         return {
+          bodyFontSize: styles
+            .getPropertyValue("--desktop-body-font-size")
+            .trim(),
           rowGap: styles.getPropertyValue("--desktop-sidebar-row-gap").trim(),
           iconTextGap: styles
             .getPropertyValue("--desktop-sidebar-icon-text-gap")
@@ -801,6 +804,7 @@ test("desktop first launch sets up Drop without the CLI", async ({ page }) => {
       })
     )
     .toEqual({
+      bodyFontSize: "14px",
       rowGap: "2px",
       iconTextGap: "4px",
       fontSize: "14px",
@@ -904,6 +908,9 @@ test("desktop first launch sets up Drop without the CLI", async ({ page }) => {
   await sidebar.getByRole("button", { name: "Home", exact: true }).click();
   await expect(page.getByText("Ready for a job", { exact: true })).toBeVisible();
   await expect(
+    page.getByText("Ready for a job", { exact: true })
+  ).toHaveCSS("font-size", "14px");
+  await expect(
     page.getByRole("heading", { name: "Give this computer a job." })
   ).toHaveCount(0);
   await expect(page.locator(".ready-grid, .ready-card, .recipe-icon")).toHaveCount(
@@ -928,6 +935,10 @@ test("desktop first launch sets up Drop without the CLI", async ({ page }) => {
     "Hook",
     "Site"
   ]);
+  await expect(desktopJobs.locator(".desktop-job-card > p").first()).toHaveCSS(
+    "font-size",
+    "14px"
+  );
   await expect(desktopJobs.locator(".desktop-job-card-action")).toHaveText([
     "Start",
     "Open",
