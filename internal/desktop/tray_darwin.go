@@ -19,7 +19,11 @@ import (
 )
 
 type darwinTray struct {
-	app *App
+	mu                  sync.RWMutex
+	app                 *App
+	started             bool
+	hasLastPresentation bool
+	lastPresentation    trayPresentation
 }
 
 var (
@@ -32,15 +36,32 @@ func newTrayController() trayController {
 }
 
 func (t *darwinTray) Start(app *App) {
+	t.mu.Lock()
 	t.app = app
+	t.started = true
+	t.hasLastPresentation = false
+	t.mu.Unlock()
+
 	activeTrayMu.Lock()
 	activeTray = t
 	activeTrayMu.Unlock()
 	C.spare_tray_start()
+	t.Update(Snapshot{})
 }
 
 func (t *darwinTray) Update(snapshot Snapshot) {
 	presentation := presentTray(snapshot)
+
+	t.mu.Lock()
+	if !t.started ||
+		(t.hasLastPresentation && t.lastPresentation == presentation) {
+		t.mu.Unlock()
+		return
+	}
+	t.lastPresentation = presentation
+	t.hasLastPresentation = true
+	t.mu.Unlock()
+
 	cHeadline := C.CString(presentation.Headline)
 	cStatus := C.CString(presentation.Status)
 	cOpen := C.CString(presentation.OpenLabel)
@@ -71,22 +92,43 @@ func (*darwinTray) SetVisible(visible bool) {
 	C.spare_tray_set_visible(C.int(value))
 }
 
-func (*darwinTray) Stop() {
-	C.spare_tray_stop()
+func (t *darwinTray) Stop() {
 	activeTrayMu.Lock()
-	activeTray = nil
+	if activeTray == t {
+		activeTray = nil
+	}
 	activeTrayMu.Unlock()
+
+	t.mu.Lock()
+	t.started = false
+	t.app = nil
+	t.hasLastPresentation = false
+	t.mu.Unlock()
+
+	C.spare_tray_stop()
 }
 
 //export spareTrayAction
 func spareTrayAction(action *C.char) {
+	actionName := C.GoString(action)
 	activeTrayMu.RLock()
 	tray := activeTray
 	activeTrayMu.RUnlock()
-	if tray == nil || tray.app == nil {
+	if tray == nil {
 		return
 	}
-	tray.app.handleTrayAction(C.GoString(action))
+
+	tray.mu.RLock()
+	app := tray.app
+	started := tray.started
+	tray.mu.RUnlock()
+	if app == nil || !started {
+		return
+	}
+
+	// Native menu callbacks run on Cocoa's main thread. Return control to
+	// AppKit before invoking Wails or the daemon so the menu can close cleanly.
+	go app.handleTrayAction(actionName)
 }
 
 func trayBool(value bool) C.int {

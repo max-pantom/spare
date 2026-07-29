@@ -2866,15 +2866,16 @@ h1 {
 
 .desktop-job-cards {
   display: grid;
-  grid-template-columns: repeat(
-    auto-fill,
-    minmax(min(15rem, 100%), 1fr)
-  );
+  width: 100%;
+  max-width: 55.25rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.625rem;
   margin-block-start: 1rem;
 }
 
 .desktop-job-card {
+  --desktop-job-gradient-end: oklab(18.8% 0.001 -0.004 / 71%);
+
   display: flex;
   width: 100%;
   min-width: 0;
@@ -2889,14 +2890,24 @@ h1 {
   background-image: linear-gradient(
     180deg in oklab,
     oklab(27.7% 0 0 / 71%) -36%,
-    oklab(18.8% 0.001 -0.004 / 71%) 100%
+    var(--desktop-job-gradient-end) 100%
   );
   box-shadow:
-    #0000000d 0 24px 1px -12px inset,
-    #ffffff80 0 0.1px 0.2px 0.1px inset,
-    #ffffff4d 0 0.1px 0.2px 0.1px inset,
-    #ffffff05 0 1px 3px -2px inset;
+    inset 0 1px 0 rgba(255, 255, 255, 0.025),
+    0 0 0 1px rgba(255, 255, 255, 0.018);
   font-synthesis: none;
+}
+
+.desktop-job-card:nth-child(1) {
+  --desktop-job-gradient-end: oklab(18.8% -0.004 -0.012 / 71%);
+}
+
+.desktop-job-card:nth-child(2) {
+  --desktop-job-gradient-end: oklab(18.8% 0.009 -0.01 / 71%);
+}
+
+.desktop-job-card:nth-child(3) {
+  --desktop-job-gradient-end: oklab(18.8% -0.01 0.008 / 71%);
 }
 
 .desktop-job-card-heading {
@@ -2932,15 +2943,8 @@ h1 {
   background-color: #2a2a2a4d;
   color: #fff;
   box-shadow:
-    #0000000d 0 24px 1px -12px inset,
-    #ffffff80 0 0.1px 0.2px 0.1px inset,
-    #ffffff4d 0 0.1px 0.2px 0.1px inset,
-    #ffffff05 0 1px 3px -2px inset,
-    #ffffff0a 0 0 0 0.1px inset,
-    #0000000d 0 24px 1px -12px inset,
-    #ffffff1a 0 0.1px 0.2px 0.1px inset,
-    #ffffff40 0 0.1px 0.2px 0.1px inset,
-    #ffffff05 0 1px 3px -2px inset;
+    inset 0 1px 0 rgba(255, 255, 255, 0.035),
+    0 0 0 1px rgba(255, 255, 255, 0.025);
   -webkit-backdrop-filter: blur(107px);
   backdrop-filter: blur(107px);
   font-size: 0.75rem;
@@ -2990,13 +2994,8 @@ h1 {
   overflow: clip;
   background-color: #ffffff0a;
   box-shadow:
-    #0000000d 0 24px 1px -12px inset,
-    #ffffff80 0 0.1px 0.2px 0.1px inset,
-    #ffffff4d 0 0.1px 0.2px 0.1px inset,
-    #ffffff05 0 1px 3px -2px inset,
-    #00000026 0 0 0 0.4px inset,
-    #b3b3b359 0 0 0 0.4px inset,
-    #00000040 0 2px 4px inset;
+    inset 0 1px 0 rgba(255, 255, 255, 0.035),
+    0 0 0 1px rgba(255, 255, 255, 0.025);
 }
 
 .desktop-job-state.is-unavailable {
@@ -3433,6 +3432,10 @@ h1 {
     width: 100%;
     min-height: auto;
     margin-inline-start: 0;
+  }
+
+  .desktop-job-cards {
+    grid-template-columns: 1fr;
   }
 
   .desktop-jobs-install {

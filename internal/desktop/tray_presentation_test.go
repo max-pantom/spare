@@ -8,6 +8,16 @@ import (
 	"github.com/spare-run/spare/internal/model"
 )
 
+func TestPresentTrayWithoutJob(t *testing.T) {
+	presentation := presentTray(Snapshot{})
+	if presentation.Headline != "No job" ||
+		presentation.OpenLabel != "Choose a job" ||
+		presentation.HasInstance ||
+		presentation.IconState != trayIconNeutral {
+		t.Fatalf("unexpected empty presentation: %#v", presentation)
+	}
+}
+
 func TestPresentTrayReadyDrop(t *testing.T) {
 	snapshot := trayTestSnapshot()
 	presentation := presentTray(snapshot)
