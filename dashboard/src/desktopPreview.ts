@@ -225,6 +225,9 @@ export function createDesktopPreviewBridge(): DesktopBridge {
   let events: Event[] = structuredClone(previewEvents);
   let preferences = structuredClone(initialPreferences);
   let nextEventID = 3;
+  const previewState = new URLSearchParams(window.location.search).get(
+    "desktop-state"
+  );
 
   const snapshot = (): DesktopSnapshot =>
     structuredClone({
@@ -235,6 +238,16 @@ export function createDesktopPreviewBridge(): DesktopBridge {
       events,
       preferences
     });
+  const pendingStartup = new Promise<DesktopSnapshot>(() => undefined);
+  const startupSnapshot = (): Promise<DesktopSnapshot> => {
+    if (previewState === "loading") return pendingStartup;
+    if (previewState === "unavailable") {
+      return Promise.reject(
+        new Error("Spare could not connect to its background service.")
+      );
+    }
+    return Promise.resolve(snapshot());
+  };
 
   const currentInstance = (id: string): Instance => {
     const instance = instances.find((candidate) => candidate.id === id);
@@ -292,8 +305,8 @@ export function createDesktopPreviewBridge(): DesktopBridge {
   };
 
   return {
-    Bootstrap: async () => snapshot(),
-    Snapshot: async () => snapshot(),
+    Bootstrap: startupSnapshot,
+    Snapshot: startupSnapshot,
     CreateInstance: async (input) => createInstance(input),
     ConfigureInstance: async (id, input) => {
       const current = currentInstance(id);

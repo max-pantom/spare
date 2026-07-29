@@ -213,7 +213,7 @@ func (s *Store) Events(ctx context.Context, limit int) ([]model.Event, error) {
 	}
 	defer rows.Close()
 
-	var result []model.Event
+	result := make([]model.Event, 0)
 	for rows.Next() {
 		var event model.Event
 		var details []byte

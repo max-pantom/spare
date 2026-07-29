@@ -13,10 +13,8 @@ static SpareTrayTarget *SpareTrayTargetInstance = nil;
 static NSMenu *SparePendingMenu = nil;
 static NSImage *SpareMarkImage = nil;
 static NSImage *SpareWarningImage = nil;
-static NSTimer *SparePulseTimer = nil;
 static BOOL SpareTrayVisible = YES;
 static BOOL SpareMenuOpen = NO;
-static BOOL SparePulseDimmed = NO;
 static int SpareCurrentIconState = -1;
 
 @interface SpareTrayTarget : NSObject <NSMenuDelegate>
@@ -45,16 +43,6 @@ static int SpareCurrentIconState = -1;
     SparePendingMenu = nil;
 }
 
-- (void)pulseIcon:(NSTimer *)timer {
-    if (SpareStatusItem == nil || SpareCurrentIconState != 2) {
-        return;
-    }
-    SparePulseDimmed = !SparePulseDimmed;
-    [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
-        [context setDuration:0.45];
-        [[SpareStatusItem.button animator] setAlphaValue:SparePulseDimmed ? 0.58 : 1.0];
-    } completionHandler:nil];
-}
 @end
 
 static NSMenuItem *SpareActionItem(NSString *title, NSString *action) {
@@ -102,15 +90,6 @@ static NSImage *SpareCreateWarningImage(void) {
     return image;
 }
 
-static void SpareStopPulse(void) {
-    if (SparePulseTimer != nil) {
-        [SparePulseTimer invalidate];
-        [SparePulseTimer release];
-        SparePulseTimer = nil;
-    }
-    SparePulseDimmed = NO;
-}
-
 static void SpareApplyIconState(int iconState) {
     if (SpareStatusItem == nil) {
         return;
@@ -128,21 +107,11 @@ static void SpareApplyIconState(int iconState) {
         return;
     }
 
-    SpareStopPulse();
     SpareCurrentIconState = iconState;
     [SpareStatusItem.button setTitle:@""];
     [SpareStatusItem.button setImage:iconState == 3 ? SpareWarningImage : SpareMarkImage];
     [SpareStatusItem.button setImagePosition:NSImageOnly];
-    [SpareStatusItem.button setAlphaValue:iconState == 0 ? 0.52 : 1.0];
-
-    if (iconState == 2 && SpareTrayTargetInstance != nil) {
-        SparePulseTimer = [[NSTimer
-            scheduledTimerWithTimeInterval:0.8
-                                    target:SpareTrayTargetInstance
-                                  selector:@selector(pulseIcon:)
-                                  userInfo:nil
-                                   repeats:YES] retain];
-    }
+    [SpareStatusItem.button setAlphaValue:1.0];
 }
 
 static NSMenu *SpareBuildMenu(
@@ -184,6 +153,7 @@ static NSMenu *SpareBuildMenu(
             [menu addItem:SpareActionItem(@"Copy address", @"copy_address")];
         }
         [menu addItem:SpareActionItem(toggleLabel, @"toggle")];
+        [menu addItem:SpareActionItem(@"View activity", @"activity")];
     } else {
         [menu addItem:SpareActionItem(openLabel, @"choose")];
     }
@@ -274,7 +244,6 @@ void spare_tray_set_visible(int visible) {
 
 void spare_tray_stop(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        SpareStopPulse();
         [SparePendingMenu release];
         SparePendingMenu = nil;
         SpareMenuOpen = NO;

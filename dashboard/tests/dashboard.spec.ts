@@ -535,6 +535,112 @@ test("survives 200 percent text scaling", async ({ page }) => {
   expect(hasHorizontalOverflow).toBe(false);
 });
 
+test("desktop loading stays inside the dark application shell", async ({
+  page
+}) => {
+  await page.addInitScript(() => {
+    const pending = new Promise(() => undefined);
+    Object.defineProperty(window, "go", {
+      configurable: true,
+      value: {
+        desktop: {
+          App: {
+            Bootstrap: () => pending,
+            Snapshot: () => pending
+          }
+        }
+      }
+    });
+  });
+  await page.setViewportSize({ width: 930, height: 509 });
+  await page.goto("/");
+  await expect(page.getByText("Starting Spare", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Connecting to the background service", { exact: true })
+  ).toBeVisible();
+  await expect(page.locator("body")).toHaveCSS(
+    "background-color",
+    "rgb(28, 28, 28)"
+  );
+  const loadingStatus = await page.locator(".desktop-ready").boundingBox();
+  const loadingCard = await page.locator(".desktop-service-card").boundingBox();
+  expect(loadingStatus?.x).toBe(loadingCard?.x);
+});
+
+test("desktop startup failure uses the aligned application shell", async ({
+  page
+}) => {
+  await page.addInitScript(() => {
+    const unavailable = () =>
+      Promise.reject(new Error("Background service unavailable"));
+    Object.defineProperty(window, "go", {
+      configurable: true,
+      value: {
+        desktop: {
+          App: {
+            Bootstrap: unavailable,
+            Snapshot: unavailable,
+            Repair: unavailable
+          }
+        }
+      }
+    });
+  });
+  await page.setViewportSize({ width: 930, height: 509 });
+  await page.goto("/");
+  await expect(page.locator(".desktop-ready")).toContainText(
+    "Spare could not start"
+  );
+  await expect(page.getByRole("button", { name: "Run repair" })).toBeVisible();
+  await expect(
+    page.getByText("Background service unavailable", { exact: true })
+  ).toBeVisible();
+});
+
+test("desktop activity handles a first-run empty history", async ({ page }) => {
+  await page.addInitScript(
+    ({ machine, recipes }) => {
+      const snapshot = {
+        surface: "desktop",
+        machine,
+        recipes,
+        instances: [],
+        events: null,
+        preferences: {
+          theme: "dark",
+          notifications: true,
+          recipeNotifications: {
+            drop: true,
+            site: true,
+            hook: true
+          },
+          openAfterLogin: false,
+          showInMenuBar: true,
+          keepRecipesRunningAfterLogin: true
+        }
+      };
+      Object.defineProperty(window, "go", {
+        configurable: true,
+        value: {
+          desktop: {
+            App: {
+              Bootstrap: async () => snapshot,
+              Snapshot: async () => snapshot,
+              PendingLaunchPaths: async () => []
+            }
+          }
+        }
+      });
+    },
+    { machine, recipes }
+  );
+  await page.setViewportSize({ width: 930, height: 509 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await expect(page.getByText("No activity yet", { exact: true })).toBeVisible();
+  await expect(page.locator(".desktop-root")).toBeVisible();
+});
+
 test("desktop first launch sets up Drop without the CLI", async ({ page }) => {
   await page.addInitScript(
     ({ machine, recipes, healthyDrop }) => {
@@ -729,9 +835,88 @@ test("desktop first launch sets up Drop without the CLI", async ({ page }) => {
       { icon: "computer", tagName: "svg", viewBox: "0 0 12 12" },
       { icon: "settings", tagName: "svg", viewBox: "0 0 12 12" }
     ]);
+  await sidebar
+    .getByRole("button", { name: "Settings", exact: true })
+    .click();
+  await page.evaluate(() => document.fonts.ready);
+  const topTextAlignment = await page.evaluate(() => {
+    const home = document.querySelector(".desktop-nav button");
+    const pageLabel = document.querySelector(
+      ".desktop-page-heading .eyebrow"
+    );
+    if (!home || !pageLabel) {
+      return { home: Number.NaN, page: Number.NaN };
+    }
+    const homeBox = home.getBoundingClientRect();
+    const pageBox = pageLabel.getBoundingClientRect();
+    return {
+      home: homeBox.top + homeBox.height / 2,
+      page: pageBox.top + pageBox.height / 2
+    };
+  });
+  expect(Number.isFinite(topTextAlignment.home)).toBe(true);
+  expect(Number.isFinite(topTextAlignment.page)).toBe(true);
+  expect(
+    Math.abs(topTextAlignment.home - topTextAlignment.page)
+  ).toBeLessThanOrEqual(0.5);
+  const measureHeader = (selector: string) =>
+    page.locator(selector).first().evaluate((header) => {
+      const box = header.getBoundingClientRect();
+      const children = Array.from(header.children).map((child) =>
+        child.getBoundingClientRect()
+      );
+      return {
+        x: box.x,
+        width: box.width,
+        height: box.height,
+        gaps: children.slice(1).map((child, index) =>
+          Number((child.top - children[index].bottom).toFixed(3))
+        )
+      };
+    });
+  const standardHeaders = [];
+  for (const destination of ["Activity", "Computer", "Settings"]) {
+    await sidebar
+      .getByRole("button", { name: destination, exact: true })
+      .click();
+    standardHeaders.push(await measureHeader(".desktop-page-heading"));
+  }
+  expect(standardHeaders.map((header) => header.x)).toEqual([153, 153, 153]);
+  expect(standardHeaders.map((header) => header.width)).toEqual([
+    672, 672, 672
+  ]);
+  expect(standardHeaders.map((header) => header.gaps)).toEqual([
+    [8, 8],
+    [8, 8],
+    [8, 8]
+  ]);
+  expect(
+    Math.max(...standardHeaders.map((header) => header.height)) -
+      Math.min(...standardHeaders.map((header) => header.height))
+  ).toBeLessThanOrEqual(0.5);
+  await sidebar.getByRole("button", { name: "Jobs", exact: true }).click();
+  const jobsHeader = await measureHeader(".desktop-jobs-heading");
+  const jobsCards = await page.locator(".desktop-job-cards").boundingBox();
+  expect(jobsHeader.x).toBe(standardHeaders[0].x);
+  expect(jobsHeader.width).toBe(standardHeaders[0].width);
+  expect(jobsHeader.gaps).toEqual([8]);
+  expect(jobsCards?.x).toBe(jobsHeader.x);
+  await sidebar.getByRole("button", { name: "Home", exact: true }).click();
+  await expect(page.getByText("Ready for a job", { exact: true })).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Give this computer a job." })
+  ).toHaveCount(0);
+  await expect(page.locator(".ready-grid, .ready-card, .recipe-icon")).toHaveCount(
+    0
+  );
+  await sidebar
+    .getByRole("button", { name: "Activity", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Activity", exact: true })
   ).toBeVisible();
+  await expect(page.getByText("No activity yet", { exact: true })).toBeVisible();
+  await sidebar.getByRole("button", { name: "Home", exact: true }).click();
   await sidebar.getByRole("button", { name: "Jobs" }).click();
   const desktopJobs = page.locator(".desktop-jobs-page");
   await expect(

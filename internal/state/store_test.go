@@ -19,6 +19,14 @@ func TestStorePersistsMachineInstanceAndEvents(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 
+	emptyEvents, err := store.Events(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if emptyEvents == nil || len(emptyEvents) != 0 {
+		t.Fatalf("expected a non-nil empty event list, got %#v", emptyEvents)
+	}
+
 	machine := model.Machine{ID: "spare_test", Hostname: "test", InitializedAt: now, LastProfiledAt: now}
 	if err := store.SaveMachine(ctx, machine); err != nil {
 		t.Fatal(err)

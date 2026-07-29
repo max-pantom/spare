@@ -331,7 +331,9 @@ export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
     setSetupInitialValues({});
     setShowShare(false);
     setError("");
-    if (destination === "machine") void refresh();
+    if (destination === "activity" || destination === "machine") {
+      void refresh();
+    }
     window.requestAnimationFrame(() => {
       const main = document.getElementById("desktop-main");
       main?.scrollTo({ top: 0, left: 0 });
@@ -391,7 +393,7 @@ export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
         <div className="sr-only" role="status" aria-live="polite">
           {announcement}
         </div>
-        {error && (
+        {error && snapshot && (
           <section className="error-panel desktop-error" role="alert">
             <strong>Spare needs attention</strong>
             <p>{error}</p>
@@ -541,7 +543,11 @@ export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
             )}
           </>
         ) : (
-          <ServiceUnavailable onRepair={() => void repair()} working={working} />
+          <ServiceUnavailable
+            message={error}
+            onRepair={() => void repair()}
+            working={working}
+          />
         )}
       </main>
     </div>
@@ -550,35 +556,50 @@ export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
 
 function LoadingView() {
   return (
-    <section className="desktop-page desktop-loading">
-      <p className="eyebrow">Preparing this computer</p>
-      <h1>Spare is starting</h1>
-      <p className="lede">
-        Creating local state, starting the background service, and profiling
-        this computer.
+    <section
+      className="desktop-page desktop-overview desktop-service-state desktop-loading"
+      aria-labelledby="desktop-loading-heading"
+    >
+      <h1 id="desktop-loading-heading" className="sr-only">
+        Spare is starting
+      </h1>
+      <p className="desktop-ready status-starting">
+        <StatusIcon status="starting" /> Starting Spare
       </p>
+      <h2 className="desktop-info-heading">Preparing</h2>
+      <div className="desktop-service-card" role="status" aria-live="polite">
+        <strong>Connecting to the background service</strong>
+        <p>Setting up local state and reading this computer.</p>
+      </div>
     </section>
   );
 }
 
 function ServiceUnavailable({
+  message,
   onRepair,
   working
 }: {
+  message: string;
   onRepair: () => void;
   working: boolean;
 }) {
   return (
-    <section className="desktop-page">
-      <p className="eyebrow status-failed">
-        <StatusIcon status="failed" /> Background service unavailable
+    <section
+      className="desktop-page desktop-overview desktop-service-state"
+      aria-labelledby="desktop-unavailable-heading"
+    >
+      <h1 id="desktop-unavailable-heading" className="sr-only">
+        Spare could not start
+      </h1>
+      <p className="desktop-ready status-failed">
+        <StatusIcon status="failed" /> Spare could not start
       </p>
-      <h1>Spare could not start</h1>
-      <p className="lede">
-        Repair the local service, then Spare will reconnect without changing
-        any selected folders.
-      </p>
-      <div className="actions">
+      <div
+        className="desktop-toolbar"
+        role="group"
+        aria-label="Startup recovery"
+      >
         <button
           className="button button-primary"
           type="button"
@@ -587,6 +608,15 @@ function ServiceUnavailable({
         >
           Run repair
         </button>
+      </div>
+      <h2 className="desktop-info-heading">Info</h2>
+      <div className="desktop-service-card">
+        <strong>Background service unavailable</strong>
+        <p>
+          {message && message !== "Background service unavailable"
+            ? message
+            : "Run repair to reconnect without changing your selected folders."}
+        </p>
       </div>
     </section>
   );
@@ -632,59 +662,57 @@ function HomeView({
     snapshot.recipes.find((candidate) => candidate.id === "drop") ??
     snapshot.recipes[0];
   if (!instance) {
+    const supportedJobs = snapshot.recipes.filter(
+      (available) => available.compatibility.supported
+    ).length;
     return (
-      <section className="desktop-page">
-        <div className="desktop-hero">
-          <p className="eyebrow">This computer is ready</p>
-          <h1>Give this computer a job.</h1>
-          <p className="lede">
-            {snapshot.machine.hostname} can receive files, serve a folder, or
-            inspect local webhooks.
-          </p>
+      <section className="desktop-page desktop-overview desktop-empty-home">
+        <h1 className="sr-only">Spare is ready</h1>
+        <p className="desktop-ready">Ready for a job</p>
+        <div
+          className="desktop-toolbar"
+          role="group"
+          aria-label="Choose a job"
+        >
           {drop && (
-            <div className="actions">
-              <button
-                className="button button-primary"
-                type="button"
-                onClick={() => onChoose(drop)}
-              >
-                Try Drop
-              </button>
-              <button
-                className="button button-secondary"
-                type="button"
-                onClick={onRecipes}
-              >
-                Choose another job
-              </button>
-              <button
-                className="button button-quiet"
-                type="button"
-                onClick={onMachine}
-              >
-                See what this computer can do
-              </button>
-            </div>
-          )}
-        </div>
-        <div className="ready-grid" aria-label="Ready for">
-          {snapshot.recipes.map((available) => (
             <button
+              className="button button-primary"
               type="button"
-              className="ready-card"
-              key={available.id}
-              onClick={() => onChoose(available)}
-              disabled={!available.compatibility.supported}
+              onClick={() => onChoose(drop)}
             >
-              <RecipeIcon recipe={available.id} />
-              <span>
-                <strong>{available.title}</strong>
-                <small>{shortDescription(available.id)}</small>
-              </span>
-              <span aria-hidden="true">→</span>
+              Try Drop
             </button>
-          ))}
+          )}
+          <button
+            className="button button-secondary"
+            type="button"
+            onClick={onRecipes}
+          >
+            Browse jobs
+          </button>
+          <button
+            className="button button-secondary"
+            type="button"
+            onClick={onMachine}
+          >
+            Computer details
+          </button>
         </div>
+        <h2 className="desktop-info-heading">Info</h2>
+        <dl className="desktop-metrics" aria-label="Computer readiness">
+          <div>
+            <dt>Available jobs</dt>
+            <dd>{supportedJobs}</dd>
+          </div>
+          <div>
+            <dt>Computer</dt>
+            <dd>{snapshot.machine.hostname}</dd>
+          </div>
+          <div>
+            <dt>Status</dt>
+            <dd>Ready</dd>
+          </div>
+        </dl>
       </section>
     );
   }
@@ -1608,7 +1636,7 @@ function ActivityView({
       )}
       <EventList
         bridge={bridge}
-        events={snapshot.events}
+        events={snapshot.events ?? []}
         recipes={snapshot.recipes}
         instances={snapshot.instances}
       />
@@ -2298,19 +2326,6 @@ function RecipeSignal() {
   );
 }
 
-function RecipeIcon({ recipe }: { recipe: string }) {
-  const symbols: Record<string, string> = {
-    drop: "↓",
-    site: "□",
-    hook: "⌁"
-  };
-  return (
-    <span className={`recipe-icon recipe-icon-${recipe}`} aria-hidden="true">
-      {symbols[recipe] ?? "◇"}
-    </span>
-  );
-}
-
 function StatusIcon({ status }: { status?: Instance["status"] }) {
   const tone = status ?? "stopped";
   return (
@@ -2323,13 +2338,6 @@ function StatusIcon({ status }: { status?: Instance["status"] }) {
 
 function titleForRecipe(recipes: Recipe[], id: string) {
   return recipes.find((recipe) => recipe.id === id)?.title ?? id;
-}
-
-function shortDescription(id: string) {
-  if (id === "drop") return "Receive and send files nearby";
-  if (id === "site") return "Serve a folder locally";
-  if (id === "hook") return "Capture and replay webhooks";
-  return "Give this computer a useful job";
 }
 
 function readyDescription(id: string) {
@@ -2488,10 +2496,16 @@ function formatBytes(value: number) {
 }
 
 function formatTime(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(new Date(value));
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Time unavailable";
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short"
+    }).format(date);
+  } catch {
+    return "Time unavailable";
+  }
 }
 
 function errorMessage(value: unknown, fallback: string) {
