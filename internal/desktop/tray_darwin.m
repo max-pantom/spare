@@ -28,6 +28,27 @@ static NSMenuItem *SpareActionItem(NSString *title, NSString *action) {
     return [item autorelease];
 }
 
+static void SpareApplyIconState(int iconState) {
+    if (SpareStatusItem == nil) {
+        return;
+    }
+    NSString *title = @"S";
+    NSFontWeight weight = NSFontWeightRegular;
+    if (iconState == 1) {
+        weight = NSFontWeightSemibold;
+    } else if (iconState == 2) {
+        title = @"S•";
+        weight = NSFontWeightMedium;
+    } else if (iconState == 3) {
+        title = @"S!";
+        weight = NSFontWeightSemibold;
+    }
+    NSFont *font = [NSFont systemFontOfSize:12 weight:weight];
+    NSDictionary *attributes = @{NSFontAttributeName: font};
+    SpareStatusItem.button.attributedTitle =
+        [[[NSAttributedString alloc] initWithString:title attributes:attributes] autorelease];
+}
+
 void spare_tray_start(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (SpareStatusItem != nil) {
@@ -35,19 +56,33 @@ void spare_tray_start(void) {
         }
         SpareTrayTargetInstance = [[SpareTrayTarget alloc] init];
         SpareStatusItem = [[[NSStatusBar systemStatusBar] statusItemWithLength:NSSquareStatusItemLength] retain];
-        SpareStatusItem.button.title = @"S";
+        SpareApplyIconState(0);
         SpareStatusItem.button.toolTip = @"Spare";
     });
 }
 
-void spare_tray_update(const char *statusValue, const char *openValue, const char *toggleValue, int hasInstance, int running) {
+void spare_tray_update(
+    const char *headlineValue,
+    const char *statusValue,
+    const char *openValue,
+    const char *toggleValue,
+    int hasInstance,
+    int isDrop,
+    int hasAddress,
+    int needsAttention,
+    int canReconnect,
+    int iconState
+) {
+    char *headlineCopy = strdup(headlineValue ?: "No job");
     char *statusCopy = strdup(statusValue ?: "No active job");
     char *openCopy = strdup(openValue ?: "Choose a job");
     char *toggleCopy = strdup(toggleValue ?: "");
     dispatch_async(dispatch_get_main_queue(), ^{
+        NSString *headline = [NSString stringWithUTF8String:headlineCopy];
         NSString *status = [NSString stringWithUTF8String:statusCopy];
         NSString *openLabel = [NSString stringWithUTF8String:openCopy];
         NSString *toggleLabel = [NSString stringWithUTF8String:toggleCopy];
+        free(headlineCopy);
         free(statusCopy);
         free(openCopy);
         free(toggleCopy);
@@ -58,21 +93,38 @@ void spare_tray_update(const char *statusValue, const char *openValue, const cha
         NSMenuItem *heading = [[[NSMenuItem alloc] initWithTitle:@"Spare" action:nil keyEquivalent:@""] autorelease];
         [heading setEnabled:NO];
         [menu addItem:heading];
-        NSMenuItem *state = [[[NSMenuItem alloc] initWithTitle:status action:nil keyEquivalent:@""] autorelease];
-        [state setEnabled:NO];
-        [menu addItem:state];
+        NSMenuItem *job = [[[NSMenuItem alloc] initWithTitle:headline action:nil keyEquivalent:@""] autorelease];
+        [job setEnabled:NO];
+        [menu addItem:job];
+        if ([status length] > 0) {
+            NSMenuItem *state = [[[NSMenuItem alloc] initWithTitle:status action:nil keyEquivalent:@""] autorelease];
+            [state setEnabled:NO];
+            [menu addItem:state];
+        }
         [menu addItem:[NSMenuItem separatorItem]];
-        [menu addItem:SpareActionItem(openLabel, hasInstance ? @"open_recipe" : @"choose")];
-        if (hasInstance) {
+        if (needsAttention) {
+            if (canReconnect) {
+                [menu addItem:SpareActionItem(@"Reconnect", @"reconnect")];
+            }
+        } else if (hasInstance) {
             [menu addItem:SpareActionItem(@"Show QR", @"share")];
+            [menu addItem:SpareActionItem(openLabel, isDrop ? @"open_files" : @"open_recipe")];
+            if (hasAddress) {
+                [menu addItem:SpareActionItem(@"Copy address", @"copy_address")];
+            }
             [menu addItem:SpareActionItem(toggleLabel, @"toggle")];
-            [menu addItem:SpareActionItem(@"Recent activity", @"activity")];
+        } else {
+            [menu addItem:SpareActionItem(openLabel, @"choose")];
+        }
+        if (!needsAttention || canReconnect) {
+            [menu addItem:[NSMenuItem separatorItem]];
         }
         [menu addItem:SpareActionItem(@"Open Spare", @"open_spare")];
-        [menu addItem:[NSMenuItem separatorItem]];
-        [menu addItem:SpareActionItem(@"Quit Spare", @"quit")];
+        [menu addItem:SpareActionItem(@"Settings", @"settings")];
+        [menu addItem:SpareActionItem(@"Quit", @"quit")];
         SpareStatusItem.menu = menu;
         SpareStatusItem.visible = SpareTrayVisible;
+        SpareApplyIconState(iconState);
     });
 }
 

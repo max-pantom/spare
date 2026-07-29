@@ -11,6 +11,7 @@ import (
 // reads KeepRecipesRunningAfterLogin so this setting still applies when the
 // full desktop window is not launched after login.
 type Desktop struct {
+	Theme                        string          `json:"theme"`
 	Notifications                bool            `json:"notifications"`
 	RecipeNotifications          map[string]bool `json:"recipeNotifications"`
 	OpenAfterLogin               bool            `json:"openAfterLogin"`
@@ -20,6 +21,7 @@ type Desktop struct {
 
 func Defaults() Desktop {
 	return Desktop{
+		Theme:         "dark",
 		Notifications: true,
 		RecipeNotifications: map[string]bool{
 			"drop": true,
@@ -68,6 +70,11 @@ func Save(root string, preferences Desktop) error {
 
 func normalize(value Desktop) Desktop {
 	defaults := Defaults()
+	switch value.Theme {
+	case "dark", "light":
+	default:
+		value.Theme = defaults.Theme
+	}
 	if value.RecipeNotifications == nil {
 		value.RecipeNotifications = defaults.RecipeNotifications
 		return value

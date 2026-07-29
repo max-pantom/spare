@@ -12,11 +12,16 @@ static GtkWidget *spare_menu = NULL;
 static gboolean spare_visible = TRUE;
 
 typedef struct {
+    char *headline;
     char *status;
     char *open_label;
     char *toggle_label;
     int has_instance;
-    int running;
+    int is_drop;
+    int has_address;
+    int needs_attention;
+    int can_reconnect;
+    int icon_state;
 } SpareTrayUpdate;
 
 static void spare_action(GtkMenuItem *item, gpointer data) {
@@ -42,26 +47,50 @@ static void spare_replace_menu(const SpareTrayUpdate *update) {
     }
     GtkWidget *menu = gtk_menu_new();
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), spare_disabled_item("Spare"));
-    gtk_menu_shell_append(GTK_MENU_SHELL(menu), spare_disabled_item(update->status));
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), spare_disabled_item(update->headline));
+    if (update->status[0] != '\0') {
+        gtk_menu_shell_append(GTK_MENU_SHELL(menu), spare_disabled_item(update->status));
+    }
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
-    gtk_menu_shell_append(
-        GTK_MENU_SHELL(menu),
-        spare_action_item(update->open_label, update->has_instance ? "open_recipe" : "choose")
-    );
-    if (update->has_instance) {
+    if (update->needs_attention) {
+        if (update->can_reconnect) {
+            gtk_menu_shell_append(GTK_MENU_SHELL(menu), spare_action_item("Reconnect", "reconnect"));
+        }
+    } else if (update->has_instance) {
         gtk_menu_shell_append(GTK_MENU_SHELL(menu), spare_action_item("Show QR", "share"));
+        gtk_menu_shell_append(
+            GTK_MENU_SHELL(menu),
+            spare_action_item(update->open_label, update->is_drop ? "open_files" : "open_recipe")
+        );
+        if (update->has_address) {
+            gtk_menu_shell_append(GTK_MENU_SHELL(menu), spare_action_item("Copy address", "copy_address"));
+        }
         gtk_menu_shell_append(GTK_MENU_SHELL(menu), spare_action_item(update->toggle_label, "toggle"));
-        gtk_menu_shell_append(GTK_MENU_SHELL(menu), spare_action_item("Recent activity", "activity"));
+    } else {
+        gtk_menu_shell_append(GTK_MENU_SHELL(menu), spare_action_item(update->open_label, "choose"));
+    }
+    if (!update->needs_attention || update->can_reconnect) {
+        gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
     }
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), spare_action_item("Open Spare", "open_spare"));
-    gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
-    gtk_menu_shell_append(GTK_MENU_SHELL(menu), spare_action_item("Quit Spare", "quit"));
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), spare_action_item("Settings", "settings"));
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), spare_action_item("Quit", "quit"));
     gtk_widget_show_all(menu);
     app_indicator_set_menu(spare_indicator, GTK_MENU(menu));
     if (spare_menu != NULL) {
         gtk_widget_destroy(spare_menu);
     }
     spare_menu = menu;
+
+    const char *icon_name = "folder-publicshare-symbolic";
+    if (update->icon_state == 1) {
+        icon_name = "media-record-symbolic";
+    } else if (update->icon_state == 2) {
+        icon_name = "emblem-synchronizing-symbolic";
+    } else if (update->icon_state == 3) {
+        icon_name = "dialog-warning-symbolic";
+    }
+    app_indicator_set_icon_full(spare_indicator, icon_name, update->headline);
 }
 
 static gboolean spare_start_idle(gpointer data) {
@@ -80,11 +109,16 @@ static gboolean spare_start_idle(gpointer data) {
         spare_visible ? APP_INDICATOR_STATUS_ACTIVE : APP_INDICATOR_STATUS_PASSIVE
     );
     SpareTrayUpdate initial = {
-        .status = "No active job",
+        .headline = "No job",
+        .status = "",
         .open_label = "Choose a job",
         .toggle_label = "",
         .has_instance = 0,
-        .running = 0,
+        .is_drop = 0,
+        .has_address = 0,
+        .needs_attention = 0,
+        .can_reconnect = 0,
+        .icon_state = 0,
     };
     spare_replace_menu(&initial);
     return G_SOURCE_REMOVE;
@@ -93,6 +127,7 @@ static gboolean spare_start_idle(gpointer data) {
 static gboolean spare_update_idle(gpointer data) {
     SpareTrayUpdate *update = (SpareTrayUpdate *)data;
     spare_replace_menu(update);
+    free(update->headline);
     free(update->status);
     free(update->open_label);
     free(update->toggle_label);
@@ -131,18 +166,28 @@ void spare_linux_tray_start(void) {
 }
 
 void spare_linux_tray_update(
+    const char *headline,
     const char *status,
     const char *open_label,
     const char *toggle_label,
     int has_instance,
-    int running
+    int is_drop,
+    int has_address,
+    int needs_attention,
+    int can_reconnect,
+    int icon_state
 ) {
     SpareTrayUpdate *update = malloc(sizeof(SpareTrayUpdate));
-    update->status = strdup(status != NULL ? status : "No active job");
+    update->headline = strdup(headline != NULL ? headline : "No job");
+    update->status = strdup(status != NULL ? status : "");
     update->open_label = strdup(open_label != NULL ? open_label : "Choose a job");
     update->toggle_label = strdup(toggle_label != NULL ? toggle_label : "");
     update->has_instance = has_instance;
-    update->running = running;
+    update->is_drop = is_drop;
+    update->has_address = has_address;
+    update->needs_attention = needs_attention;
+    update->can_reconnect = can_reconnect;
+    update->icon_state = icon_state;
     g_idle_add(spare_update_idle, update);
 }
 

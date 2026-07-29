@@ -3,27 +3,47 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState
 } from "react";
+import type { RefObject } from "react";
 import QRCode from "qrcode";
 import type { DesktopBridge } from "./desktop";
+import { presentEvent, presentProblem } from "./presentation";
 import type {
   DesktopPreferences,
   DesktopSnapshot,
+  DesktopTheme,
   Event,
   Instance,
   Recipe
 } from "./types";
+import { SpareNavIcon, type SpareNavIconName } from "./SpareNavIcon";
 
 type View = "home" | "recipes" | "activity" | "machine" | "settings";
 
-const navigation: Array<{ id: View; label: string }> = [
-  { id: "home", label: "Home" },
-  { id: "recipes", label: "Recipes" },
-  { id: "activity", label: "Activity" },
-  { id: "machine", label: "Machine" },
-  { id: "settings", label: "Settings" }
+const navigation: Array<{
+  id: View;
+  label: string;
+  icon: SpareNavIconName;
+}> = [
+  { id: "home", label: "Home", icon: "home" },
+  { id: "recipes", label: "Jobs", icon: "jobs" },
+  { id: "activity", label: "Activity", icon: "activity" },
+  { id: "machine", label: "Computer", icon: "computer" },
+  { id: "settings", label: "Settings", icon: "settings" }
 ];
+
+const transformationStepDelay = 900;
+const transformationCompleteDelay = 1800;
+const transformationStepCount = 4;
+
+type TransformationState = {
+  step: number;
+  complete: boolean;
+};
+
+type TransformationStage = "" | "starting" | "complete";
 
 const statusLabels: Record<Instance["status"], string> = {
   starting: "Starting",
@@ -34,9 +54,24 @@ const statusLabels: Record<Instance["status"], string> = {
   removing: "Removing"
 };
 
+const desktopThemes: Array<{
+  id: DesktopTheme;
+  label: string;
+}> = [
+  {
+    id: "dark",
+    label: "Dark"
+  },
+  {
+    id: "light",
+    label: "Light"
+  }
+];
+
 export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
   const [snapshot, setSnapshot] = useState<DesktopSnapshot>();
   const [view, setView] = useState<View>("home");
+  const [detailRecipe, setDetailRecipe] = useState<Recipe>();
   const [setupRecipe, setSetupRecipe] = useState<Recipe>();
   const [editingInstance, setEditingInstance] = useState<Instance>();
   const [setupInitialValues, setSetupInitialValues] = useState<
@@ -48,6 +83,9 @@ export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
   const [announcement, setAnnouncement] = useState("");
+  const [themePreview, setThemePreview] = useState<DesktopTheme>();
+  const [transformationStage, setTransformationStage] =
+    useState<TransformationStage>("");
 
   const refresh = useCallback(async () => {
     try {
@@ -88,6 +126,7 @@ export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
           const pathField =
             site.config.find((field) => field.type === "directory")?.id ?? "path";
           setSetupInitialValues({ [pathField]: dropped[0].path });
+          setDetailRecipe(undefined);
           setEditingInstance(undefined);
           setSetupRecipe(site);
           setView("recipes");
@@ -155,12 +194,15 @@ export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
         if (
           destination === "activity" ||
           destination === "recipes" ||
+          destination === "settings" ||
           destination === "share"
         ) {
           if (destination === "share") {
             setView("home");
+            setDetailRecipe(undefined);
             setShowShare(true);
           } else {
+            setDetailRecipe(undefined);
             setView(destination);
           }
         }
@@ -189,6 +231,29 @@ export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
   const activeRecipe = snapshot?.recipes.find(
     (recipe) => recipe.id === instance?.recipeId
   );
+  const windowTitle = transformationStage === "starting" && setupRecipe
+    ? `Starting ${setupRecipe.title}`
+    : transformationStage === "complete" && setupRecipe
+      ? `This computer is now a ${setupRecipe.title}`
+      : instance
+        ? `This computer is a ${activeRecipe?.title ?? instance.recipeId}`
+        : setupRecipe
+          ? `Set up ${setupRecipe.title}`
+          : detailRecipe
+            ? detailRecipe.title
+            : view === "home"
+              ? "Spare"
+              : navigation.find((item) => item.id === view)?.label ?? "Spare";
+  const windowState = windowStateFor(
+    instance,
+    loading,
+    error,
+    transformationStage
+  );
+
+  useEffect(() => {
+    document.title = `${windowTitle} · Spare`;
+  }, [windowTitle]);
 
   async function lifecycle(action: "start" | "stop") {
     if (!instance) return;
@@ -258,58 +323,71 @@ export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
   }
 
   function navigate(destination: View) {
+    if (transformationStage) return;
     setView(destination);
+    setDetailRecipe(undefined);
     setSetupRecipe(undefined);
     setEditingInstance(undefined);
     setSetupInitialValues({});
     setShowShare(false);
     setError("");
+    if (destination === "machine") void refresh();
+    window.requestAnimationFrame(() => {
+      const main = document.getElementById("desktop-main");
+      main?.scrollTo({ top: 0, left: 0 });
+      main?.focus({ preventScroll: true });
+    });
   }
 
   return (
-    <div className="desktop-root">
+    <div
+      className="desktop-root"
+      data-theme={themePreview ?? snapshot?.preferences.theme ?? "dark"}
+    >
       <a className="skip-link" href="#desktop-main">
         Skip to content
       </a>
+      <header className="desktop-titlebar">
+        {!window.runtime && (
+          <span className="window-controls" aria-hidden="true">
+            <span className="window-control window-control-close" />
+            <span className="window-control window-control-minimize" />
+            <span className="window-control window-control-zoom" />
+          </span>
+        )}
+        <p>{windowTitle}</p>
+        <span className={`desktop-window-state state-${windowState.tone}`}>
+          <span aria-hidden="true" />
+          {windowState.label}
+        </span>
+      </header>
       <aside className="desktop-sidebar">
-        <div className="desktop-brand" translate="no">
-          <span className="brand-mark" aria-hidden="true">
-            S
-          </span>
-          <span>
-            <strong>Spare</strong>
-            <small>{snapshot?.machine.hostname ?? "This computer"}</small>
-          </span>
-        </div>
-        <nav className="desktop-nav" aria-label="Spare">
+        <nav className="desktop-nav" aria-label="Primary">
           {navigation.map((item) => (
             <button
               key={item.id}
               type="button"
               aria-current={view === item.id ? "page" : undefined}
+              disabled={Boolean(transformationStage)}
               onClick={() => navigate(item.id)}
             >
-              <NavIcon name={item.id} />
+              <SpareNavIcon
+                className="nav-icon"
+                name={item.icon}
+                size={14}
+              />
               {item.label}
             </button>
           ))}
         </nav>
-        <div className="desktop-sidebar-status">
-          <StatusIcon status={instance?.status} />
-          <span>
-            <strong>
-              {instance
-                ? `${activeRecipe?.title ?? instance.recipeId} ${statusLabels[
-                    instance.status
-                  ].toLowerCase()}`
-                : "No active job"}
-            </strong>
-            <small>Background service connected</small>
-          </span>
-        </div>
       </aside>
 
-      <main id="desktop-main" className="desktop-main" aria-busy={loading}>
+      <main
+        id="desktop-main"
+        className="desktop-main"
+        aria-busy={loading}
+        tabIndex={-1}
+      >
         <div className="sr-only" role="status" aria-live="polite">
           {announcement}
         </div>
@@ -336,19 +414,26 @@ export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
             recipe={setupRecipe}
             initialValues={setupInitialValues}
             existingInstance={editingInstance}
+            onTransformationStageChange={setTransformationStage}
+            backLabel={detailRecipe ? `Back to ${detailRecipe.title}` : "Back to jobs"}
             onBack={() => {
               setSetupRecipe(undefined);
               setEditingInstance(undefined);
             }}
             onStarted={async (created) => {
               const wasEditing = Boolean(editingInstance);
+              setSnapshot((current) =>
+                current ? { ...current, instances: [created] } : current
+              );
+              setTransformationStage("");
+              setDetailRecipe(undefined);
               setSetupRecipe(undefined);
               setEditingInstance(undefined);
               setView("home");
               setAnnouncement(
                 wasEditing
                   ? `${setupRecipe.title} configuration was updated.`
-                  : `${setupRecipe.title} ${created.mode === "temporary" ? "is running temporarily" : "will keep running after login"}.`
+                  : `This computer is now a ${setupRecipe.title}.`
               );
               await refresh();
             }}
@@ -367,15 +452,17 @@ export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
                 onChoose={(recipe) => {
                   setSetupInitialValues({});
                   setEditingInstance(undefined);
-                  setSetupRecipe(recipe);
+                  setDetailRecipe(recipe);
                   setView("recipes");
                 }}
                 onStart={() => void lifecycle("start")}
                 onStop={() => void lifecycle("stop")}
                 onAddFiles={() => void addFilesToDrop()}
                 onActivity={() => navigate("activity")}
+                onRepair={() => void repair()}
                 onConfigure={() => {
                   if (instance && activeRecipe) {
+                    setDetailRecipe(undefined);
                     setSetupInitialValues(instance.config);
                     setEditingInstance(instance);
                     setSetupRecipe(activeRecipe);
@@ -386,23 +473,45 @@ export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
               />
             )}
             {view === "recipes" && (
-              <RecipesView
-                bridge={bridge}
-                snapshot={snapshot}
-                onChoose={(recipe) => {
-                  setSetupInitialValues({});
-                  setEditingInstance(undefined);
-                  setSetupRecipe(recipe);
-                }}
-                onChanged={refresh}
-              />
+              detailRecipe ? (
+                <JobDetailView
+                  recipe={detailRecipe}
+                  snapshot={snapshot}
+                  onBack={() => setDetailRecipe(undefined)}
+                  onSetup={() => {
+                    setSetupInitialValues({});
+                    setEditingInstance(undefined);
+                    setSetupRecipe(detailRecipe);
+                  }}
+                />
+              ) : (
+                <RecipesView
+                  bridge={bridge}
+                  snapshot={snapshot}
+                  onChoose={(recipe) => {
+                    setSetupInitialValues({});
+                    setEditingInstance(undefined);
+                    setDetailRecipe(recipe);
+                  }}
+                />
+              )
             )}
             {view === "activity" && (
               <ActivityView
                 bridge={bridge}
-                events={snapshot.events}
-                recipes={snapshot.recipes}
-                instances={snapshot.instances}
+                snapshot={snapshot}
+                working={working}
+                onRepair={() => void repair()}
+                onDetails={() => navigate("machine")}
+                onStop={() => void lifecycle("stop")}
+                onConfigure={() => {
+                  if (instance && activeRecipe) {
+                    setDetailRecipe(undefined);
+                    setSetupInitialValues(instance.config);
+                    setEditingInstance(instance);
+                    setSetupRecipe(activeRecipe);
+                  }
+                }}
               />
             )}
             {view === "machine" && <MachineView snapshot={snapshot} />}
@@ -412,10 +521,12 @@ export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
                 snapshot={snapshot}
                 preferences={snapshot.preferences}
                 initialBackupPath={droppedBackup}
+                onThemeChange={setThemePreview}
                 onSaved={refresh}
                 onRepair={() => void repair()}
                 onConfigure={() => {
                   if (instance && activeRecipe) {
+                    setDetailRecipe(undefined);
                     setSetupInitialValues(instance.config);
                     setEditingInstance(instance);
                     setSetupRecipe(activeRecipe);
@@ -494,6 +605,7 @@ function HomeView({
   onStop,
   onAddFiles,
   onActivity,
+  onRepair,
   onConfigure,
   onRecipes,
   onMachine
@@ -510,10 +622,12 @@ function HomeView({
   onStop: () => void;
   onAddFiles: () => void;
   onActivity: () => void;
+  onRepair: () => void;
   onConfigure: () => void;
   onRecipes: () => void;
   onMachine: () => void;
 }) {
+  const scanButtonRef = useRef<HTMLButtonElement>(null);
   const drop =
     snapshot.recipes.find((candidate) => candidate.id === "drop") ??
     snapshot.recipes[0];
@@ -577,127 +691,145 @@ function HomeView({
 
   const title = recipe?.title ?? instance.recipeId;
   const running = ["starting", "healthy", "degraded"].includes(instance.status);
-  const recent = snapshot.events.slice(0, 3);
+  const latestEvent = snapshot.events.find(
+    (event) => event.instanceId === instance.id
+  );
+  const metrics = overviewMetrics(instance, latestEvent);
+  const primaryURL = instance.urls[0];
   return (
-    <section className="desktop-page">
-      <div className="desktop-hero">
-        <p className={`eyebrow status-${instance.status}`}>
-          <StatusIcon status={instance.status} />
-          {statusLabels[instance.status]}
+    <section className="desktop-page desktop-overview">
+      <h1 className="sr-only">This computer is a {title}</h1>
+      {instance.problem ? (
+        <DesktopFailureState
+          instance={instance}
+          title={title}
+          working={working}
+          onRepair={onRepair}
+          onDetails={onActivity}
+          onReconnect={onConfigure}
+          onStop={onStop}
+        />
+      ) : (
+        <p className={`desktop-ready status-${instance.status}`}>
+          {instance.status === "healthy"
+            ? compactReadyDescription(instance.recipeId)
+            : `${title} is ${statusLabels[instance.status].toLowerCase()}.`}
         </p>
-        <h1>This computer is a {title}</h1>
-        <p className="lede">
-          {instance.problem?.summary ??
-            (instance.status === "healthy"
-              ? readyDescription(instance.recipeId)
-              : `${title} is ${statusLabels[instance.status].toLowerCase()}.`)}
-        </p>
-        {instance.problem && (
-          <p className="recovery">{instance.problem.recovery}</p>
-        )}
-        <div className="actions" aria-label={`${title} controls`}>
-          {instance.status === "healthy" && instance.urls[0] && (
-            <button
-              className="button button-primary"
-              type="button"
-              onClick={() => void bridge.OpenURL(instance.urls[0])}
-            >
-              Open {title}
-            </button>
-          )}
-          {instance.status === "healthy" && (
-            <button
-              className="button button-secondary"
-              type="button"
-              onClick={onShowShare}
-              aria-expanded={showShare}
-            >
-              {showShare ? "Hide access" : "Share access"}
-            </button>
-          )}
-          {instance.recipeId === "drop" && (
-            <button
-              className="button button-secondary"
-              type="button"
-              onClick={onAddFiles}
-              disabled={working}
-            >
-              Add files to Drop
-            </button>
-          )}
-          {running ? (
-            <button
-              className="button button-secondary"
-              type="button"
-              onClick={onStop}
-              disabled={working}
-            >
-              Stop {title}
-            </button>
-          ) : (
-            <button
-              className="button button-primary"
-              type="button"
-              onClick={onStart}
-              disabled={working}
-            >
-              Start {title}
-            </button>
-          )}
+      )}
+
+      {!instance.problem && (
+        <div
+          className="desktop-toolbar"
+          role="group"
+          aria-label={`${title} controls`}
+        >
+        <button
+          ref={scanButtonRef}
+          className="button button-primary"
+          type="button"
+          onClick={onShowShare}
+          aria-expanded={showShare}
+          disabled={!primaryURL}
+        >
+          Scan QR
+        </button>
+        <button
+          className="button button-secondary"
+          type="button"
+          onClick={() => primaryURL && void bridge.OpenURL(primaryURL)}
+          disabled={!primaryURL}
+        >
+          Open {title}
+        </button>
+        {instance.recipeId === "drop" ? (
           <button
-            className="button button-quiet"
+            className="button button-secondary"
+            type="button"
+            onClick={() =>
+              instance.dataPath && void bridge.RevealPath(instance.dataPath)
+            }
+            disabled={!instance.dataPath}
+          >
+            Open Received files
+          </button>
+        ) : (
+          <button
+            className="button button-secondary"
             type="button"
             onClick={onConfigure}
           >
             Configure
           </button>
+        )}
+        {running ? (
+          <button
+            className="button button-secondary"
+            type="button"
+            onClick={onStop}
+            disabled={working}
+          >
+            Pause
+          </button>
+        ) : (
+          <button
+            className="button button-primary"
+            type="button"
+            onClick={onStart}
+            disabled={working}
+          >
+            Resume
+          </button>
+        )}
+        {instance.recipeId === "drop" && (
+          <button
+            className="button button-secondary"
+            type="button"
+            onClick={onAddFiles}
+            disabled={working}
+          >
+            Add files to Drop
+          </button>
+        )}
+        {instance.recipeId === "drop" && (
+          <button
+            className="button button-secondary"
+            type="button"
+            onClick={onConfigure}
+          >
+            Configure
+          </button>
+        )}
+        <button
+          className="button button-secondary"
+          type="button"
+          onClick={onActivity}
+        >
+          View activity
+        </button>
         </div>
-      </div>
-
-      {instance.recipeId === "drop" && (
-        <dl className="desktop-metrics" aria-label="Drop status">
-          <div>
-            <dt>Received</dt>
-            <dd>
-              {instance.itemCount} {instance.itemCount === 1 ? "file" : "files"}
-            </dd>
-          </div>
-          <div>
-            <dt>Storage</dt>
-            <dd>{formatBytes(instance.storageAvailableBytes)} available</dd>
-          </div>
-          <div>
-            <dt>Mode</dt>
-            <dd>
-              {instance.mode === "installed"
-                ? "Runs after login"
-                : "Temporary"}
-            </dd>
-          </div>
-        </dl>
       )}
+
+      <h2 className="desktop-info-heading">Info</h2>
+      <dl className="desktop-metrics" aria-label={`${title} status`}>
+        {metrics.map((metric) => (
+          <div key={metric.label}>
+            <dt>{metric.label}</dt>
+            <dd>{metric.value}</dd>
+          </div>
+        ))}
+      </dl>
 
       {showShare && (
-        <SharePanel instance={instance} bridge={bridge} title={title} />
+        <SharePanel
+          instance={instance}
+          bridge={bridge}
+          title={title}
+          onClose={onShowShare}
+          returnFocusRef={scanButtonRef}
+        />
       )}
 
-      <section className="desktop-section" aria-labelledby="recent-heading">
-        <div className="desktop-section-heading">
-          <div>
-            <p className="eyebrow">Latest changes</p>
-            <h2 id="recent-heading">Recent activity</h2>
-          </div>
-          <button className="text-button" type="button" onClick={onActivity}>
-            View activity
-          </button>
-        </div>
-        <EventList
-          bridge={bridge}
-          events={recent}
-          recipes={snapshot.recipes}
-          instances={snapshot.instances}
-        />
-      </section>
+      {instance.recipeId === "drop" && <RecipeSignal />}
     </section>
   );
 }
@@ -705,11 +837,15 @@ function HomeView({
 function SharePanel({
   instance,
   bridge,
-  title
+  title,
+  onClose,
+  returnFocusRef
 }: {
   instance: Instance;
   bridge: DesktopBridge;
   title: string;
+  onClose: () => void;
+  returnFocusRef: RefObject<HTMLButtonElement | null>;
 }) {
   const shareURL =
     instance.urls.find(
@@ -718,43 +854,89 @@ function SharePanel({
     instance.urls[0] ??
     "";
   const [qrCode, setQrCode] = useState("");
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (!dialog.open) dialog.showModal();
+    closeButtonRef.current?.focus();
+    return () => {
+      if (dialog.open) dialog.close();
+      window.requestAnimationFrame(() => returnFocusRef.current?.focus());
+    };
+  }, [returnFocusRef]);
+
   useEffect(() => {
     if (!shareURL) return;
     void QRCode.toDataURL(shareURL, {
       width: 256,
       margin: 2,
-      color: { dark: "#17221c", light: "#ffffff" }
+      color: { dark: "#151515", light: "#ffffff" }
     }).then(setQrCode);
   }, [shareURL]);
   return (
-    <section className="desktop-share" aria-labelledby="share-heading">
-      <div>
-        <p className="eyebrow">Phone or nearby computer</p>
-        <h2 id="share-heading">Open {title} nearby</h2>
-        <p>
-          Scan the code or enter the address while both devices use the same
-          local network.
-        </p>
+    <dialog
+      ref={dialogRef}
+      className="desktop-share-dialog"
+      aria-labelledby="share-heading"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      onMouseDown={(event) => {
+        const bounds = event.currentTarget.getBoundingClientRect();
+        const outside =
+          event.clientX < bounds.left ||
+          event.clientX > bounds.right ||
+          event.clientY < bounds.top ||
+          event.clientY > bounds.bottom;
+        if (outside) onClose();
+      }}
+    >
+      <section className="desktop-share">
         <button
-          className="text-button"
+          ref={closeButtonRef}
+          className="desktop-share-close"
           type="button"
-          onClick={() => void bridge.OpenURL(shareURL)}
+          aria-label="Close QR code"
+          onClick={onClose}
         >
-          Open this address
+          <span aria-hidden="true">×</span>
         </button>
-      </div>
-      <div className="desktop-qr">
-        {qrCode && (
-          <img
-            src={qrCode}
-            alt={`QR code for ${shareURL}`}
-            width="176"
-            height="176"
-          />
-        )}
-        <code>{shareURL}</code>
-      </div>
-    </section>
+        <div className="desktop-share-copy">
+          <p className="eyebrow">Nearby access</p>
+          <h2 id="share-heading">Open {title} nearby</h2>
+          <p>
+            Scan the code or enter the address while both devices use the same
+            local network.
+          </p>
+          <button
+            className="text-button"
+            type="button"
+            onClick={() => void bridge.OpenURL(shareURL)}
+          >
+            Open this address
+          </button>
+        </div>
+        <div className="desktop-qr">
+          {qrCode ? (
+            <img
+              src={qrCode}
+              alt={`QR code for ${shareURL}`}
+              width="176"
+              height="176"
+            />
+          ) : (
+            <span className="desktop-qr-placeholder" role="status">
+              Preparing code…
+            </span>
+          )}
+          <code>{shareURL}</code>
+        </div>
+      </section>
+    </dialog>
   );
 }
 
@@ -763,6 +945,8 @@ function SetupView({
   recipe,
   initialValues,
   existingInstance,
+  onTransformationStageChange,
+  backLabel,
   onBack,
   onStarted
 }: {
@@ -770,8 +954,10 @@ function SetupView({
   recipe: Recipe;
   initialValues: Record<string, unknown>;
   existingInstance?: Instance;
+  onTransformationStageChange: (stage: TransformationStage) => void;
+  backLabel: string;
   onBack: () => void;
-  onStarted: (instance: Instance) => void;
+  onStarted: (instance: Instance) => void | Promise<void>;
 }) {
   const initial = useMemo(
     () =>
@@ -792,6 +978,8 @@ function SetupView({
   );
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
+  const [transformation, setTransformation] =
+    useState<TransformationState>();
 
   async function chooseDirectory(fieldID: string) {
     try {
@@ -819,6 +1007,7 @@ function SetupView({
     }
     setWorking(true);
     setError("");
+    const transformationController = new AbortController();
     try {
       const input = {
         recipeId: recipe.id,
@@ -827,11 +1016,37 @@ function SetupView({
         port: existingInstance?.portMode === "fixed" ? existingInstance.port : 0,
         portMode: existingInstance?.portMode ?? ("auto" as const)
       };
-      const created = existingInstance
-        ? await bridge.ConfigureInstance(existingInstance.id, input)
-        : await bridge.CreateInstance(input);
-      onStarted(created);
+      if (existingInstance) {
+        const configured = await bridge.ConfigureInstance(
+          existingInstance.id,
+          input
+        );
+        await onStarted(configured);
+        return;
+      }
+
+      setTransformation({ step: 0, complete: false });
+      onTransformationStageChange("starting");
+      const [created] = await Promise.all([
+        bridge.CreateInstance(input),
+        playTransformationSequence(
+          (step) => setTransformation({ step, complete: false }),
+          transformationController.signal
+        )
+      ]);
+      setTransformation({
+        step: transformationStepCount - 1,
+        complete: true
+      });
+      onTransformationStageChange("complete");
+      await waitForTransformation(
+        transformationCompleteDelay,
+        transformationController.signal
+      );
+      await onStarted(created);
     } catch (requestError) {
+      transformationController.abort();
+      setTransformation(undefined);
       setError(
         errorMessage(
           requestError,
@@ -839,14 +1054,38 @@ function SetupView({
         )
       );
     } finally {
+      transformationController.abort();
+      onTransformationStageChange("");
       setWorking(false);
     }
   }
 
+  const transformationAnnouncement = transformation
+    ? transformation.complete
+      ? `This computer is now a ${recipe.title}.`
+      : transformationSteps(recipe.title)[transformation.step]
+    : "";
+
   return (
-    <section className="desktop-page setup-page">
+    <>
+      <div
+        className="sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {transformationAnnouncement}
+      </div>
+      {transformation ? (
+        <TransformationView
+          title={recipe.title}
+          step={transformation.step}
+          complete={transformation.complete}
+        />
+      ) : (
+      <section className="desktop-page setup-page">
       <button className="back-button" type="button" onClick={onBack}>
-        <span aria-hidden="true">←</span> Back to recipes
+        <span aria-hidden="true">←</span> {backLabel}
       </button>
       <div className="desktop-page-heading">
         <p className="eyebrow">Built in and trusted</p>
@@ -973,180 +1212,405 @@ function SetupView({
           </button>
         </div>
       </form>
+      </section>
+      )}
+    </>
+  );
+}
+
+function TransformationView({
+  title,
+  step,
+  complete
+}: {
+  title: string;
+  step: number;
+  complete: boolean;
+}) {
+  const steps = transformationSteps(title);
+  return (
+    <section
+      className={`desktop-page transformation-page${complete ? " is-complete" : ""}`}
+      aria-labelledby="transformation-heading"
+    >
+      <div className="transformation-content">
+        <p className="eyebrow">{complete ? "Job ready" : "Starting a job"}</p>
+        <h1 id="transformation-heading">
+          {complete
+            ? `This computer is now a ${title}.`
+            : `Preparing ${title}`}
+        </h1>
+        <ol
+          className="transformation-steps"
+          data-progress={complete ? "complete" : step}
+          aria-label={`${title} startup progress`}
+        >
+          {steps.map((label, index) => {
+            const state = complete || index < step
+              ? "done"
+              : index === step
+                ? "current"
+                : "pending";
+            return (
+              <li
+                className={`transformation-step is-${state}`}
+                aria-current={state === "current" ? "step" : undefined}
+                key={label}
+              >
+                <span className="transformation-marker" aria-hidden="true">
+                  {state === "done" ? "✓" : ""}
+                </span>
+                <span>{label}</span>
+                <span className="sr-only">
+                  {state === "done"
+                    ? " — complete"
+                    : state === "current"
+                      ? " — in progress"
+                      : " — waiting"}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+      </div>
     </section>
+  );
+}
+
+type JobDetailCopy = {
+  headline: string;
+  summary: string;
+  benefits: string[];
+  permissions: string[];
+};
+
+const jobDetailCopy: Record<string, JobDetailCopy> = {
+  drop: {
+    headline: "Turn this computer into a nearby file receiver.",
+    summary:
+      "Send files from phones, tablets, and other computers without uploading them to the cloud.",
+    benefits: [
+      "Receives files over the local network",
+      "Stores them in a folder you choose",
+      "Shows recent transfers",
+      "Works from any nearby browser"
+    ],
+    permissions: [
+      "Receive local network connections",
+      "Write into Downloads/Spare",
+      "Run after login"
+    ]
+  },
+  site: {
+    headline: "Turn this computer into a private local website.",
+    summary:
+      "Share a folder with nearby devices in a browser while its files stay on this computer.",
+    benefits: [
+      "Serves a folder as a read-only website",
+      "Works over the local network",
+      "Opens from any nearby browser",
+      "Keeps the original files on this computer"
+    ],
+    permissions: [
+      "Receive local network connections",
+      "Read the folder you choose",
+      "Run after login"
+    ]
+  },
+  hook: {
+    headline: "Turn this computer into a local webhook receiver.",
+    summary:
+      "Inspect requests from nearby apps and devices without sending their data to a cloud service.",
+    benefits: [
+      "Receives local webhook requests",
+      "Shows headers and request bodies",
+      "Keeps a recent request history",
+      "Works from nearby development devices"
+    ],
+    permissions: [
+      "Receive local network connections",
+      "Store recent requests locally",
+      "Run after login"
+    ]
+  }
+};
+
+function JobDetailView({
+  recipe,
+  snapshot,
+  onBack,
+  onSetup
+}: {
+  recipe: Recipe;
+  snapshot: DesktopSnapshot;
+  onBack: () => void;
+  onSetup: () => void;
+}) {
+  const copy = jobDetailCopy[recipe.id] ?? {
+    headline: recipe.description,
+    summary:
+      "Run this trusted job locally and keep its working data on this computer.",
+    benefits: [
+      "Runs on this computer",
+      "Uses the local network when needed",
+      "Keeps working data nearby",
+      "Can run again after login"
+    ],
+    permissions: recipe.permissions.map(
+      (permission) => permission.description
+    )
+  };
+  const machine = snapshot.machine;
+  const networkAvailable =
+    machine.capabilities.canServeLAN || machine.lanAddresses.length > 0;
+  const hasCurrentJob = snapshot.instances.length > 0;
+  const canSetUp = recipe.compatibility.supported && !hasCurrentJob;
+
+  return (
+    <article className="desktop-page job-detail-page">
+      <button className="back-button" type="button" onClick={onBack}>
+        <span aria-hidden="true">←</span> Back to jobs
+      </button>
+
+      <header className="job-detail-header">
+        <p className="eyebrow">{recipe.title}</p>
+        <h1>{copy.headline}</h1>
+        <p className="lede">{copy.summary}</p>
+      </header>
+
+      <section className="job-detail-section" aria-labelledby="job-does-heading">
+        <h2 id="job-does-heading">What it does</h2>
+        <ul className="job-detail-list">
+          {copy.benefits.map((benefit) => (
+            <li key={benefit}>
+              <span className="job-detail-marker" aria-hidden="true">✓</span>
+              <span>{benefit}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section
+        className="job-detail-section"
+        aria-labelledby="job-computer-heading"
+      >
+        <h2 id="job-computer-heading">This computer</h2>
+        <ul className="job-machine-list">
+          <li>
+            <span className="job-detail-marker" aria-hidden="true">✓</span>
+            <strong>{recipe.compatibility.rating} for {recipe.title}</strong>
+          </li>
+          <li>
+            <span className="job-detail-marker" aria-hidden="true">✓</span>
+            <strong>{formatBytes(machine.storageAvailableBytes)} available</strong>
+          </li>
+          <li>
+            <span className="job-detail-marker" aria-hidden="true">
+              {networkAvailable ? "✓" : "—"}
+            </span>
+            <strong>
+              {networkAvailable
+                ? "Local network available"
+                : "Local network unavailable"}
+            </strong>
+          </li>
+          <li>
+            <span className="job-detail-marker" aria-hidden="true">✓</span>
+            <strong>
+              {machine.capabilities.hasBattery
+                ? "Battery powered"
+                : "No battery limits"}
+            </strong>
+          </li>
+        </ul>
+      </section>
+
+      <section
+        className="job-detail-section job-permission-section"
+        aria-labelledby="job-permissions-heading"
+      >
+        <h2 id="job-permissions-heading">
+          {recipe.title} needs access to
+        </h2>
+        <ul className="job-detail-list">
+          {copy.permissions.map((permission) => (
+            <li key={permission}>
+              <span className="job-detail-marker" aria-hidden="true">✓</span>
+              <span>{permission}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <div className="job-detail-action">
+        <button
+          className="button button-primary"
+          type="button"
+          onClick={onSetup}
+          disabled={!canSetUp}
+        >
+          Set up {recipe.title}
+        </button>
+        {!recipe.compatibility.supported && (
+          <p>This computer does not currently support {recipe.title}.</p>
+        )}
+        {hasCurrentJob && (
+          <p>Change the current job before setting up another one.</p>
+        )}
+      </div>
+    </article>
   );
 }
 
 function RecipesView({
   bridge,
   snapshot,
-  onChoose,
-  onChanged
+  onChoose
 }: {
   bridge: DesktopBridge;
   snapshot: DesktopSnapshot;
   onChoose: (recipe: Recipe) => void;
-  onChanged: () => Promise<void>;
 }) {
-  const instance = snapshot.instances[0];
-  const [confirmRemove, setConfirmRemove] = useState(false);
   const [error, setError] = useState("");
-  async function remove() {
-    if (!instance) return;
+  const installedJobs = [...snapshot.recipes].sort(
+    (first, second) => installedJobRank(first.id) - installedJobRank(second.id)
+  );
+
+  async function installMoreJobs() {
     try {
-      await bridge.RemoveInstance(instance.id);
-      setConfirmRemove(false);
-      await onChanged();
+      await bridge.OpenRecipePackage("");
+      setError("");
     } catch (requestError) {
       setError(
         errorMessage(
           requestError,
-          "Unable to remove this job. Its selected folder was not changed."
+          "Unable to open a job package. No installed jobs were changed."
         )
       );
     }
   }
+
   return (
-    <section className="desktop-page">
-      <div className="desktop-page-heading">
-        <p className="eyebrow">Built in and trusted</p>
-        <h1>Recipes</h1>
-        <p className="lede">
-          Choose one useful job for this computer. You can change it without
-          deleting any selected folder.
+    <section className="desktop-page desktop-jobs-page">
+      <div className="desktop-jobs-heading">
+        <h1>Installed Jobs</h1>
+        <p>
+          Choose one useful job for this computer. Give this computer something
+          new to do.
         </p>
-        <button
-          className="button button-quiet"
-          type="button"
-          onClick={() => void bridge.OpenRecipePackage("")}
-        >
-          Inspect a recipe package
-        </button>
       </div>
       {error && (
         <div className="form-error" role="alert">
           {error}
         </div>
       )}
-      {instance && (
-        <section className="installed-recipe" aria-labelledby="installed-heading">
-          <div>
-            <p className="card-kicker">Installed</p>
-            <h2 id="installed-heading">
-              {titleForRecipe(snapshot.recipes, instance.recipeId)}
-            </h2>
-            <p className="path">{instance.dataPath || "No selected folder"}</p>
-          </div>
-          <div className="actions">
-            {instance.dataPath && (
+      <div className="desktop-job-cards" aria-label="Installed jobs">
+        {installedJobs.map((recipe) => (
+          <article className="desktop-job-card" key={recipe.id}>
+            <div className="desktop-job-card-heading">
+              <h2>{recipe.title}</h2>
               <button
-                className="button button-secondary"
+                className="desktop-job-card-action"
                 type="button"
-                onClick={() => void bridge.RevealPath(instance.dataPath)}
+                onClick={() => onChoose(recipe)}
+                disabled={!recipe.compatibility.supported}
               >
-                Show folder
+                {recipe.id === "hook" ? "Open" : "Start"}
               </button>
-            )}
-            {!confirmRemove ? (
-              <button
-                className="button button-quiet"
-                type="button"
-                onClick={() => setConfirmRemove(true)}
-              >
-                Change job
-              </button>
-            ) : (
-              <>
-                <button
-                  className="button button-danger"
-                  type="button"
-                  onClick={() => void remove()}
-                >
-                  Remove {titleForRecipe(snapshot.recipes, instance.recipeId)}
-                </button>
-                <button
-                  className="button button-secondary"
-                  type="button"
-                  onClick={() => setConfirmRemove(false)}
-                >
-                  Cancel
-                </button>
-              </>
-            )}
-          </div>
-          {confirmRemove && (
-            <p className="remove-note" role="status">
-              Spare will remove this job and its logs. The selected folder and
-              every file inside it will remain unchanged.
-            </p>
-          )}
-        </section>
-      )}
-      <div className="desktop-recipe-grid" aria-label="Available recipes">
-        {snapshot.recipes.map((recipe) => (
-          <article className="desktop-recipe-card" key={recipe.id}>
-            <RecipeIcon recipe={recipe.id} />
-            <div>
-              <div className="recipe-title-row">
-                <h2>{recipe.title}</h2>
-                <span className="status-label">
-                  <StatusIcon
-                    status={
-                      instance?.recipeId === recipe.id
-                        ? instance.status
-                        : recipe.compatibility.supported
-                          ? "healthy"
-                          : "failed"
-                    }
-                  />
-                  {instance?.recipeId === recipe.id
-                    ? "Active"
-                    : recipe.compatibility.rating}
-                </span>
-              </div>
-              <p>{recipe.description}</p>
             </div>
-            <button
-              className="button button-secondary"
-              type="button"
-              onClick={() => onChoose(recipe)}
-              disabled={Boolean(instance) || !recipe.compatibility.supported}
-            >
-              Set up {recipe.title}
-            </button>
+            <p>{installedJobDescription(recipe.id)}</p>
+            <footer>
+              <span
+                className={
+                  recipe.compatibility.supported
+                    ? "desktop-job-state"
+                    : "desktop-job-state is-unavailable"
+                }
+              >
+                {recipe.compatibility.supported ? "Active" : "Unavailable"}
+              </span>
+              <span>Pre-installed</span>
+            </footer>
           </article>
         ))}
       </div>
+      <button
+        className="desktop-jobs-install"
+        type="button"
+        onClick={() => void installMoreJobs()}
+      >
+        Install more jobs
+      </button>
     </section>
   );
 }
 
+const installedJobOrder = ["drop", "hook", "site"];
+
+function installedJobRank(id: string) {
+  const rank = installedJobOrder.indexOf(id);
+  return rank === -1 ? installedJobOrder.length : rank;
+}
+
+function installedJobDescription(id: string) {
+  if (id === "drop") {
+    return "Receive files directly from nearby phones, tablets, and computers over your local network.";
+  }
+  if (id === "hook") {
+    return "Capture, inspect, and replay webhook requests while testing apps, integrations, and automations.";
+  }
+  if (id === "site") {
+    return "Turn any folder into a local website that nearby devices can open through their browser.";
+  }
+  return "Give this computer something useful to do.";
+}
+
 function ActivityView({
   bridge,
-  events,
-  recipes,
-  instances
+  snapshot,
+  working,
+  onRepair,
+  onDetails,
+  onStop,
+  onConfigure
 }: {
   bridge: DesktopBridge;
-  events: Event[];
-  recipes: Recipe[];
-  instances: Instance[];
+  snapshot: DesktopSnapshot;
+  working: boolean;
+  onRepair: () => void;
+  onDetails: () => void;
+  onStop: () => void;
+  onConfigure: () => void;
 }) {
+  const instance = snapshot.instances[0];
+  const recipe = snapshot.recipes.find(
+    (available) => available.id === instance?.recipeId
+  );
+  const title = recipe?.title ?? instance?.recipeId ?? "Job";
+
   return (
-    <section className="desktop-page">
+    <section className="desktop-page activity-page">
       <div className="desktop-page-heading">
-        <p className="eyebrow">Recent changes</p>
+        <p className="eyebrow">System history</p>
         <h1>Activity</h1>
-        <p className="lede">
-          Files received, starts, stops, address changes, and recovery appear
-          here.
-        </p>
+        <p className="lede">A human-readable history of what this computer has done.</p>
       </div>
+      {instance?.problem && (
+        <DesktopFailureState
+          instance={instance}
+          title={title}
+          working={working}
+          onRepair={onRepair}
+          onDetails={onDetails}
+          onReconnect={onConfigure}
+          onStop={onStop}
+        />
+      )}
       <EventList
         bridge={bridge}
-        events={events}
-        recipes={recipes}
-        instances={instances}
+        events={snapshot.events}
+        recipes={snapshot.recipes}
+        instances={snapshot.instances}
       />
     </section>
   );
@@ -1180,6 +1644,15 @@ function EventList({
           event.details.itemName
             ? event.details.itemName
             : "";
+        const instance = instances.find(
+          (available) => available.id === event.instanceId
+        );
+        const title =
+          recipes.find(
+            (recipe) =>
+              recipe.id === (instance?.recipeId ?? event.instanceId)
+          )?.title ?? "Spare";
+        const presented = presentEvent(event, title);
         return (
           <li key={event.id}>
             <StatusIcon
@@ -1192,18 +1665,8 @@ function EventList({
               }
             />
             <div>
-              <strong>
-                {event.instanceId
-                  ? recipes.find(
-                      (recipe) =>
-                        recipe.id ===
-                        instances.find(
-                          (instance) => instance.id === event.instanceId
-                        )?.recipeId
-                    )?.title ?? "Spare"
-                  : "Spare"}
-              </strong>
-              <p>{event.message}</p>
+              <strong>{presented.summary}</strong>
+              {presented.detail && <p>{presented.detail}</p>}
             </div>
             <time dateTime={event.createdAt}>{formatTime(event.createdAt)}</time>
             {receivedName && event.instanceId && (
@@ -1227,6 +1690,85 @@ function EventList({
   );
 }
 
+function DesktopFailureState({
+  instance,
+  title,
+  working,
+  onRepair,
+  onDetails,
+  onReconnect,
+  onStop
+}: {
+  instance: Instance;
+  title: string;
+  working: boolean;
+  onRepair: () => void;
+  onDetails: () => void;
+  onReconnect: () => void;
+  onStop: () => void;
+}) {
+  const failure = presentProblem(instance, title);
+  return (
+    <section
+      className="desktop-failure-state"
+      aria-labelledby="desktop-failure-heading"
+    >
+      <p className="eyebrow status-failed">
+        <StatusIcon status="failed" /> Needs attention
+      </p>
+      <h2 id="desktop-failure-heading">{failure.title}</h2>
+      <p>{failure.explanation}</p>
+      <div className="actions">
+        {failure.storageProblem ? (
+          <>
+            <button
+              className="button button-primary"
+              type="button"
+              onClick={onRepair}
+              disabled={working}
+            >
+              Reconnect folder
+            </button>
+            <button
+              className="button button-secondary"
+              type="button"
+              onClick={onReconnect}
+            >
+              Choose another folder
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              className="button button-primary"
+              type="button"
+              onClick={onRepair}
+              disabled={working}
+            >
+              Run repair
+            </button>
+            <button
+              className="button button-secondary"
+              type="button"
+              onClick={onDetails}
+            >
+              View details
+            </button>
+          </>
+        )}
+        <button
+          className="button button-secondary"
+          type="button"
+          onClick={onStop}
+          disabled={working}
+        >
+          {failure.storageProblem ? "Stop job" : `Stop ${title}`}
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function MachineView({ snapshot }: { snapshot: DesktopSnapshot }) {
   const machine = snapshot.machine;
   return (
@@ -1239,23 +1781,57 @@ function MachineView({ snapshot }: { snapshot: DesktopSnapshot }) {
           computer can run.
         </p>
       </div>
-      <dl className="machine-grid">
-        <MachineMetric label="System" value={`${machine.os}/${machine.architecture}`} />
-        <MachineMetric label="CPU" value={`${machine.logicalCores} logical cores`} />
-        <MachineMetric label="Memory" value={formatBytes(machine.memoryTotalBytes)} />
-        <MachineMetric
-          label="Available storage"
-          value={formatBytes(machine.storageAvailableBytes)}
-        />
-        <MachineMetric
-          label="Local network"
-          value={
-            machine.lanAddresses.length
-              ? machine.lanAddresses.join(", ")
-              : "No address available"
-          }
-        />
-      </dl>
+      <section
+        className="machine-technical-section"
+        aria-labelledby="desktop-machine-technical-heading"
+      >
+        <h2 id="desktop-machine-technical-heading">Technical details</h2>
+        <dl className="machine-grid">
+          <MachineMetric label="System" value={machine.os} />
+          <MachineMetric label="Architecture" value={machine.architecture} />
+          <MachineMetric
+            label="CPU"
+            value={`${machine.logicalCores} logical cores`}
+          />
+          <MachineMetric
+            label="Memory"
+            value={formatBytes(machine.memoryTotalBytes)}
+          />
+          <MachineMetric
+            label="Storage"
+            value={formatBytes(machine.storageAvailableBytes)}
+          />
+          <MachineMetric
+            label="Network"
+            value={
+              machine.lanAddresses.length
+                ? machine.lanAddresses.join(", ")
+                : "No address available"
+            }
+            technical
+          />
+          <MachineMetric
+            label="Battery"
+            value={machine.capabilities.hasBattery ? "Battery powered" : "No battery"}
+          />
+          <MachineMetric
+            label="External drives"
+            value={
+              machine.capabilities.hasExternalStorage
+                ? "Detected"
+                : "None detected"
+            }
+          />
+          <MachineMetric
+            label="Container support"
+            value={
+              machine.capabilities.canRunContainers
+                ? "Available"
+                : "Unavailable"
+            }
+          />
+        </dl>
+      </section>
       {machine.capabilities.hasBattery && (
         <p className="machine-warning">
           <span aria-hidden="true">△</span> This computer may sleep when its lid
@@ -1271,6 +1847,7 @@ function SettingsView({
   snapshot,
   preferences,
   initialBackupPath,
+  onThemeChange,
   onSaved,
   onRepair,
   onConfigure,
@@ -1280,6 +1857,7 @@ function SettingsView({
   snapshot: DesktopSnapshot;
   preferences: DesktopPreferences;
   initialBackupPath: string;
+  onThemeChange: (theme: DesktopTheme) => void;
   onSaved: () => Promise<void>;
   onRepair: () => void;
   onConfigure: () => void;
@@ -1490,6 +2068,39 @@ function SettingsView({
               }
             />
           </label>
+        </section>
+        <section aria-labelledby="appearance-heading">
+          <h2 id="appearance-heading">Appearance</h2>
+          <p>Choose how the Spare window looks on this computer.</p>
+          <fieldset className="theme-picker">
+            <legend className="sr-only">Theme</legend>
+            {desktopThemes.map((theme) => (
+              <label className="theme-choice" key={theme.id}>
+                <span
+                  className={`theme-preview theme-preview-${theme.id}`}
+                  aria-hidden="true"
+                >
+                  <span />
+                </span>
+                <span>
+                  <strong>{theme.label}</strong>
+                </span>
+                <input
+                  type="radio"
+                  name="desktop-theme"
+                  value={theme.id}
+                  checked={values.theme === theme.id}
+                  onChange={() => {
+                    setValues((current) => ({
+                      ...current,
+                      theme: theme.id
+                    }));
+                    onThemeChange(theme.id);
+                  }}
+                />
+              </label>
+            ))}
+          </fieldset>
           <div className="settings-actions">
             <button
               className="button button-primary"
@@ -1662,24 +2273,29 @@ function SettingsView({
   );
 }
 
-function MachineMetric({ label, value }: { label: string; value: string }) {
+function MachineMetric({
+  label,
+  value,
+  technical = false
+}: {
+  label: string;
+  value: string;
+  technical?: boolean;
+}) {
   return (
     <div>
       <dt>{label}</dt>
-      <dd>{value}</dd>
+      <dd className={technical ? "technical-value" : undefined}>{value}</dd>
     </div>
   );
 }
 
-function NavIcon({ name }: { name: View }) {
-  const symbols: Record<View, string> = {
-    home: "⌂",
-    recipes: "◇",
-    activity: "↻",
-    machine: "▣",
-    settings: "⚙"
-  };
-  return <span aria-hidden="true">{symbols[name]}</span>;
+function RecipeSignal() {
+  return (
+    <div className="recipe-signal recipe-signal-drop" aria-hidden="true">
+      <span className="recipe-signal-mark" />
+    </div>
+  );
 }
 
 function RecipeIcon({ recipe }: { recipe: string }) {
@@ -1721,6 +2337,142 @@ function readyDescription(id: string) {
   if (id === "site") return "Site is serving its selected folder read-only.";
   if (id === "hook") return "Hook is ready to receive and inspect requests.";
   return "This job is ready.";
+}
+
+function compactReadyDescription(id: string) {
+  if (id === "drop") return "Ready to receive files";
+  if (id === "site") return "Serving one folder read-only";
+  if (id === "hook") return "Ready to capture requests";
+  return "Ready";
+}
+
+function overviewMetrics(instance: Instance, latestEvent?: Event) {
+  const lastActivity = latestEvent
+    ? `${latestEvent.message} ${formatRelativeTime(latestEvent.createdAt)}`
+    : "No activity yet";
+  if (instance.recipeId === "drop") {
+    return [
+      { label: "Files received today", value: String(instance.itemCount) },
+      {
+        label: "Storage available",
+        value: formatBytes(instance.storageAvailableBytes)
+      },
+      { label: "Last activity", value: lastActivity }
+    ];
+  }
+  if (instance.recipeId === "hook") {
+    return [
+      { label: "Requests captured", value: String(instance.itemCount) },
+      { label: "Local endpoint", value: compactAddress(instance.urls[0]) },
+      { label: "Last activity", value: lastActivity }
+    ];
+  }
+  return [
+    { label: "Folder", value: finalPathPart(instance.dataPath) },
+    { label: "Access", value: "Read-only" },
+    { label: "Local address", value: compactAddress(instance.urls[0]) }
+  ];
+}
+
+function finalPathPart(path: string) {
+  if (!path) return "No folder selected";
+  const parts = path.replaceAll("\\", "/").split("/").filter(Boolean);
+  return parts.at(-1) ?? path;
+}
+
+function compactAddress(url?: string) {
+  if (!url) return "Unavailable";
+  try {
+    const parsed = new URL(url);
+    return parsed.host;
+  } catch {
+    return url;
+  }
+}
+
+function formatRelativeTime(value: string) {
+  const elapsed = Date.now() - new Date(value).getTime();
+  if (!Number.isFinite(elapsed) || elapsed < 0) return "just now";
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} ${minutes === 1 ? "minute" : "minutes"} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} ${hours === 1 ? "hour" : "hours"} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} ${days === 1 ? "day" : "days"} ago`;
+}
+
+function windowStateFor(
+  instance: Instance | undefined,
+  loading: boolean,
+  error: string,
+  transformationStage: TransformationStage = ""
+) {
+  if (error || instance?.status === "failed") {
+    return { label: "Failed", tone: "failed" };
+  }
+  if (instance?.status === "degraded") {
+    return { label: "Attention", tone: "warning" };
+  }
+  if (transformationStage === "complete") {
+    return { label: "Working", tone: "working" };
+  }
+  if (
+    transformationStage === "starting" ||
+    loading ||
+    instance?.status === "starting"
+  ) {
+    return { label: "Starting", tone: "working" };
+  }
+  if (instance?.status === "stopped") {
+    return { label: "Paused", tone: "paused" };
+  }
+  if (instance?.status === "healthy") {
+    return { label: "Ready", tone: "ready" };
+  }
+  return { label: "Ready", tone: "ready" };
+}
+
+function transformationSteps(title: string) {
+  return [
+    "Preparing storage",
+    "Checking permissions",
+    "Opening local access",
+    `Starting ${title}`
+  ];
+}
+
+async function playTransformationSequence(
+  onStep: (step: number) => void,
+  signal: AbortSignal
+) {
+  for (let step = 1; step < transformationStepCount; step += 1) {
+    await waitForTransformation(transformationStepDelay, signal);
+    if (signal.aborted) return;
+    onStep(step);
+  }
+  await waitForTransformation(transformationStepDelay, signal);
+}
+
+function waitForTransformation(milliseconds: number, signal: AbortSignal) {
+  return new Promise<void>((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const timer = window.setTimeout(finish, milliseconds);
+    signal.addEventListener("abort", cancel, { once: true });
+
+    function finish() {
+      signal.removeEventListener("abort", cancel);
+      resolve();
+    }
+
+    function cancel() {
+      window.clearTimeout(timer);
+      resolve();
+    }
+  });
 }
 
 function formatBytes(value: number) {

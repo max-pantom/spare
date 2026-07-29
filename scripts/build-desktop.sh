@@ -47,6 +47,7 @@ ARCHIVE="$PROJECT_ROOT/dist/desktop/spare-desktop_${RELEASE_VERSION}_darwin_${TA
 ICONSET="$PROJECT_ROOT/dist/desktop/Spare.iconset"
 
 rm -rf "$APP_ROOT" "$PACKAGE_ROOT" "$ICONSET"
+rm -f "$ARCHIVE"
 mkdir -p "$MACOS_DIR" "$RESOURCES/recipes" "$BIN_RESOURCES" "$PACKAGE_ROOT" "$ICONSET"
 
 go build -trimpath -tags "desktop production" \
@@ -67,17 +68,33 @@ done
 sed "s/__VERSION__/$RELEASE_VERSION/g" \
   "$PROJECT_ROOT/desktop/build/darwin/Info.plist" > "$CONTENTS/Info.plist"
 cp "$PROJECT_ROOT/desktop/icons/app-icon.svg" "$RESOURCES/app-icon.svg"
+ICON_PREVIEW_DIR=$(mktemp -d)
+trap 'rm -rf "$ICON_PREVIEW_DIR"' EXIT INT TERM
+ICON_SOURCE="$ICON_PREVIEW_DIR/app-icon.png"
+(
+  cd "$PROJECT_ROOT/dashboard"
+  node scripts/render-svg-icon.mjs \
+    "$PROJECT_ROOT/desktop/icons/app-icon.svg" \
+    "$ICON_SOURCE" \
+    1024
+)
+if [ ! -f "$ICON_SOURCE" ]; then
+  echo "Unable to render the Spare application icon." >&2
+  exit 1
+fi
 for icon_size in 16 32 128 256 512; do
   sips -s format png -z "$icon_size" "$icon_size" \
-    "$PROJECT_ROOT/desktop/icons/app-icon.svg" \
+    "$ICON_SOURCE" \
     --out "$ICONSET/icon_${icon_size}x${icon_size}.png" >/dev/null
   retina_size=$((icon_size * 2))
   sips -s format png -z "$retina_size" "$retina_size" \
-    "$PROJECT_ROOT/desktop/icons/app-icon.svg" \
+    "$ICON_SOURCE" \
     --out "$ICONSET/icon_${icon_size}x${icon_size}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET" -o "$RESOURCES/Spare.icns"
 rm -rf "$ICONSET"
+rm -rf "$ICON_PREVIEW_DIR"
+trap - EXIT INT TERM
 cp "$PROJECT_ROOT/desktop/build/darwin/uninstall.sh" "$RESOURCES/uninstall.sh"
 chmod 755 "$RESOURCES/uninstall.sh"
 

@@ -3,6 +3,16 @@ import QRCode from "qrcode";
 import { loadDashboard, startInstance, stopInstance } from "./api";
 import { DesktopApp } from "./DesktopApp";
 import { desktopBridge } from "./desktop";
+import {
+  createDashboardPreviewState,
+  createDesktopPreviewBridge
+} from "./desktopPreview";
+import {
+  displayMachineName,
+  presentEvent,
+  presentProblem
+} from "./presentation";
+import { SpareNavIcon, type SpareNavIconName } from "./SpareNavIcon";
 import type { Event, Instance, Machine, Recipe } from "./types";
 
 type DashboardState = {
@@ -10,6 +20,32 @@ type DashboardState = {
   recipes: Recipe[];
   instances: Instance[];
   events: Event[];
+};
+
+const dashboardPages = [
+  "overview",
+  "transfer",
+  "recipes",
+  "machine",
+  "activity"
+] as const;
+
+type DashboardPage = (typeof dashboardPages)[number];
+
+const dashboardPageLabels: Record<DashboardPage, string> = {
+  overview: "Dashboard",
+  transfer: "Transfer",
+  recipes: "Jobs",
+  machine: "Computer",
+  activity: "Activity"
+};
+
+const dashboardPageIcons: Record<DashboardPage, SpareNavIconName> = {
+  overview: "home",
+  transfer: "transfer",
+  recipes: "jobs",
+  machine: "computer",
+  activity: "activity"
 };
 
 const statusLabels: Record<Instance["status"], string> = {
@@ -21,8 +57,18 @@ const statusLabels: Record<Instance["status"], string> = {
   removing: "Removing"
 };
 
+const previewParams = new URLSearchParams(window.location.search);
+
+const desktopPreviewBridge =
+  import.meta.env.DEV && previewParams.has("desktop-preview")
+    ? createDesktopPreviewBridge()
+    : undefined;
+
+const dashboardPreview =
+  import.meta.env.DEV && previewParams.has("dashboard-preview");
+
 export function App() {
-  const bridge = desktopBridge();
+  const bridge = desktopBridge() ?? desktopPreviewBridge;
   if (bridge) {
     return <DesktopApp bridge={bridge} />;
   }
@@ -30,12 +76,17 @@ export function App() {
 }
 
 function BrowserDashboard() {
-  const [data, setData] = useState<DashboardState>({
-    recipes: [],
-    instances: [],
-    events: []
-  });
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<DashboardState>(() =>
+    dashboardPreview
+      ? createDashboardPreviewState()
+      : {
+          recipes: [],
+          instances: [],
+          events: []
+        }
+  );
+  const [page, setPage] = useState<DashboardPage>(dashboardPageFromHash);
+  const [loading, setLoading] = useState(!dashboardPreview);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
   const [announcement, setAnnouncement] = useState("");
@@ -43,6 +94,10 @@ function BrowserDashboard() {
   const previousStatus = useRef<string | undefined>(undefined);
 
   const refresh = useCallback(async (announce = false) => {
+    if (dashboardPreview) {
+      setLoading(false);
+      return;
+    }
     try {
       const next = await loadDashboard();
       setData(next);
@@ -77,9 +132,20 @@ function BrowserDashboard() {
 
   useEffect(() => {
     void refresh();
+    if (dashboardPreview) return;
     const timer = window.setInterval(() => void refresh(true), 2_000);
     return () => window.clearInterval(timer);
   }, [refresh]);
+
+  useEffect(() => {
+    const syncPage = () => setPage(dashboardPageFromHash());
+    window.addEventListener("hashchange", syncPage);
+    return () => window.removeEventListener("hashchange", syncPage);
+  }, []);
+
+  useEffect(() => {
+    document.title = `${dashboardPageLabels[page]} · Spare`;
+  }, [page]);
 
   const instance = data.instances[0];
   const activeRecipe = data.recipes.find(
@@ -113,14 +179,33 @@ function BrowserDashboard() {
     setWorking(true);
     setError("");
     try {
-      const updated =
-        action === "start"
+      const updated: Instance = dashboardPreview
+        ? {
+            ...instance,
+            desiredState: action === "start" ? "running" : "stopped",
+            status: action === "start" ? "healthy" : "stopped",
+            updatedAt: new Date().toISOString()
+          }
+        : action === "start"
           ? await startInstance(instance.id)
           : await stopInstance(instance.id);
-      setData((current) => ({
-        ...current,
-        instances: [updated]
-      }));
+      setData((current) => {
+        const nextEvent: Event = {
+          id: Math.max(0, ...current.events.map((event) => event.id)) + 1,
+          instanceId: instance.id,
+          level: "info",
+          kind: action === "start" ? "instance_started" : "instance_stopped",
+          message: `${title} ${action === "start" ? "started" : "stopped"}.`,
+          createdAt: new Date().toISOString()
+        };
+        return {
+          ...current,
+          instances: [updated],
+          events: dashboardPreview
+            ? [nextEvent, ...current.events]
+            : current.events
+        };
+      });
       setAnnouncement(
         `${title} ${action === "start" ? "started" : "stopped"}.`
       );
@@ -128,83 +213,363 @@ function BrowserDashboard() {
       setError(
         requestError instanceof Error
           ? requestError.message
-          : `Unable to ${action} ${title}. Run spare doctor for details.`
+          : `Unable to ${action} ${title}. Open Spare on that computer and run repair.`
       );
     } finally {
       setWorking(false);
-      void refresh();
+      if (!dashboardPreview) void refresh();
     }
   }
 
   return (
-    <>
+    <div className="dashboard-root">
       <a className="skip-link" href="#main">
         Skip to content
       </a>
-      <header className="masthead">
-        <div className="masthead-row">
-          <div className="brand" translate="no">
-            <span className="brand-mark" aria-hidden="true">
-              S
-            </span>
-            Spare
-          </div>
-          {data.machine && (
-            <p className="machine-name">
-              Remote dashboard · {data.machine.hostname}
-            </p>
-          )}
-        </div>
-        <nav className="section-nav" aria-label="Dashboard sections">
-          <a href="#machine">Machine</a>
-          <a href="#recipes">Recipes</a>
-          <a href="#instance">Instance</a>
-          <a href="#activity">Activity</a>
+      <aside className="dashboard-sidebar">
+        <a className="dashboard-brand" href="#overview" translate="no">
+          <span className="dashboard-brand-mark" aria-hidden="true" />
+          <span>
+            <strong>Spare</strong>
+            <small>Browser dashboard</small>
+          </span>
+        </a>
+        <nav className="dashboard-nav" aria-label="Dashboard sections">
+          {dashboardPages.map((destination) => (
+            <a
+              key={destination}
+              href={`#${destination}`}
+              aria-current={page === destination ? "page" : undefined}
+            >
+              <SpareNavIcon
+                className="dashboard-nav-icon"
+                name={dashboardPageIcons[destination]}
+                size={16}
+              />
+              {dashboardPageLabels[destination]}
+            </a>
+          ))}
         </nav>
-      </header>
+        {data.machine && (
+          <div className="dashboard-machine-summary">
+            <StatusIcon
+              tone={
+                instance?.status === "healthy"
+                  ? "healthy"
+                  : instance?.status ?? "ready"
+              }
+            />
+            <span>
+              <strong>{data.machine.hostname}</strong>
+              <small>
+                {instance
+                  ? `${activeRecipe?.title ?? sentenceCase(instance.recipeId)} · ${statusLabels[instance.status]}`
+                  : "Ready for a recipe"}
+              </small>
+            </span>
+          </div>
+        )}
+      </aside>
 
-      <main id="main" className="shell" aria-busy={loading}>
-        <div role="status" className="sr-only">
-          {announcement}
+      <div className="dashboard-frame">
+        <header className="dashboard-topbar">
+          <div className="dashboard-remote-machine">
+            <strong>
+              {data.machine
+                ? displayMachineName(data.machine.hostname)
+                : "Spare computer"}
+            </strong>
+            <small className="dashboard-connection">
+              <StatusIcon
+                tone={error ? "failed" : loading ? "starting" : "healthy"}
+              />
+              {error
+                ? "Connection needs attention"
+                : loading
+                  ? "Connecting locally"
+                  : "Connected locally"}
+            </small>
+          </div>
+          <p>{dashboardPageLabels[page]}</p>
+          <details className="dashboard-mobile-menu">
+            <summary>Menu</summary>
+            <nav aria-label="Mobile dashboard sections">
+              {dashboardPages.map((destination) => (
+                <a
+                  key={destination}
+                  href={`#${destination}`}
+                  aria-current={page === destination ? "page" : undefined}
+                >
+                  {dashboardPageLabels[destination]}
+                </a>
+              ))}
+            </nav>
+          </details>
+        </header>
+
+        <main id="main" className="dashboard-main" aria-busy={loading} tabIndex={-1}>
+          <div role="status" className="sr-only">
+            {announcement}
+          </div>
+
+          {error && (
+            <section className="error-panel" role="alert">
+              <strong>Unable to reach this computer</strong>
+              <p>{error}</p>
+              <p>Spare will keep trying to reconnect locally.</p>
+            </section>
+          )}
+
+          {loading && !data.machine ? (
+            <section className="dashboard-page hero" aria-label="Loading Spare">
+              <p className="eyebrow">Checking this computer</p>
+              <h1>Spare is starting</h1>
+              <p className="lede">
+                Reading its recipes, current job, and local addresses.
+              </p>
+            </section>
+          ) : (
+            <>
+              {page === "overview" && (
+                <DashboardOverview
+                  instance={instance}
+                  recipe={activeRecipe}
+                  machine={data.machine}
+                  events={data.events}
+                  recipes={data.recipes}
+                  shareURL={shareURL}
+                />
+              )}
+              {page === "transfer" && (
+                <InstanceView
+                  instance={instance}
+                  recipe={activeRecipe}
+                  machine={data.machine}
+                  qrCode={qrCode}
+                  shareURL={shareURL}
+                  working={working}
+                  onStart={() => void changeState("start")}
+                  onStop={() => void changeState("stop")}
+                />
+              )}
+              {page === "recipes" && (
+                <RecipesView
+                  recipes={data.recipes}
+                  installedRecipeID={instance?.recipeId}
+                />
+              )}
+              {page === "machine" && data.machine && (
+                <MachineView machine={data.machine} />
+              )}
+              {page === "activity" && (
+                <ActivityView
+                  events={data.events}
+                  recipes={data.recipes}
+                />
+              )}
+            </>
+          )}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function DashboardOverview({
+  instance,
+  recipe,
+  machine,
+  events,
+  recipes,
+  shareURL
+}: {
+  instance?: Instance;
+  recipe?: Recipe;
+  machine?: Machine;
+  events: Event[];
+  recipes: Recipe[];
+  shareURL: string;
+}) {
+  const title = recipe?.title ?? sentenceCase(instance?.recipeId ?? "recipe");
+  const running = Boolean(
+    instance && ["starting", "healthy", "degraded"].includes(instance.status)
+  );
+  const status = instance ? statusLabels[instance.status] : "Ready";
+
+  return (
+    <section
+      id="overview"
+      className="dashboard-page dashboard-overview"
+      aria-labelledby="dashboard-heading"
+    >
+      <div className="dashboard-page-heading dashboard-overview-heading">
+        <div>
+          <p className="eyebrow">
+            <StatusIcon
+              tone={
+                instance?.status === "healthy"
+                  ? "healthy"
+                  : instance?.status ?? "ready"
+              }
+            />
+            Remote computer · {status}
+          </p>
+          <h1 id="dashboard-heading">
+            {machine ? displayMachineName(machine.hostname) : "Spare computer"}
+          </h1>
+          <p className="lede">
+            Access its current job, share access, recent activity, and basic
+            controls from this browser.
+          </p>
         </div>
+        <a className="button button-primary" href="#transfer">
+          Open current job
+        </a>
+      </div>
 
-        {error && (
-          <section className="error-panel" role="alert">
-            <strong>Spare needs attention</strong>
-            <p>{error}</p>
-          </section>
-        )}
+      <dl className="dashboard-stat-grid" aria-label="Dashboard summary">
+        <div>
+          <dt>Current job</dt>
+          <dd>{instance ? title : "None"}</dd>
+          <small>{running ? "Available now" : "Not running"}</small>
+        </div>
+        <div>
+          <dt>
+            {instance?.recipeId === "hook" ? "Requests received" : "Files received"}
+          </dt>
+          <dd>{instance?.itemCount ?? 0}</dd>
+          <small>Since this role started</small>
+        </div>
+        <div>
+          <dt>Available storage</dt>
+          <dd>
+            {formatBytes(
+              instance?.storageAvailableBytes ??
+                machine?.storageAvailableBytes ??
+                0
+            )}
+          </dd>
+          <small>On {machine?.hostname ?? "this computer"}</small>
+        </div>
+      </dl>
 
-        {loading && !data.machine ? (
-          <section className="hero" aria-label="Loading Spare">
-            <p className="eyebrow">Checking this computer</p>
-            <h1>Spare is starting</h1>
-            <p className="lede">
-              Reading its recipes, current job, and local addresses.
-            </p>
-          </section>
+      <div className="dashboard-overview-grid">
+        <section
+          className="dashboard-panel dashboard-transfer-summary"
+          aria-labelledby="transfer-summary-heading"
+        >
+          <div className="dashboard-panel-heading">
+            <div>
+              <p className="card-kicker">Transfer</p>
+              <h2 id="transfer-summary-heading">
+                {instance
+                  ? `${title} is ${running ? "available" : "paused"}`
+                  : "No transfer role is active"}
+              </h2>
+            </div>
+            <span className={`dashboard-state status-${instance?.status ?? "ready"}`}>
+              <StatusIcon
+                tone={
+                  instance?.status === "healthy"
+                    ? "healthy"
+                    : instance?.status ?? "ready"
+                }
+              />
+              {status}
+            </span>
+          </div>
+          <p>
+            {instance
+              ? remoteReadyMessage(instance, machine)
+              : "Choose Drop, Site, or Hook on the Spare computer to make a local service available."}
+          </p>
+          {shareURL && (
+            <code className="dashboard-address" translate="no">
+              {shareURL}
+            </code>
+          )}
+          <a className="dashboard-text-link" href="#transfer">
+            Open transfer details <span aria-hidden="true">→</span>
+          </a>
+        </section>
+
+        <section
+          className="dashboard-panel dashboard-shortcuts"
+          aria-labelledby="shortcuts-heading"
+        >
+          <div className="dashboard-panel-heading">
+            <div>
+              <p className="card-kicker">Manage</p>
+              <h2 id="shortcuts-heading">Explore this computer</h2>
+            </div>
+          </div>
+          <nav aria-label="Dashboard shortcuts">
+            <a href="#recipes">
+              <span>
+                <strong>Jobs</strong>
+                <small>Review Drop, Site, and Hook</small>
+              </span>
+              <span aria-hidden="true">→</span>
+            </a>
+            <a href="#machine">
+              <span>
+                <strong>Computer</strong>
+                <small>See capabilities and system details</small>
+              </span>
+              <span aria-hidden="true">→</span>
+            </a>
+          </nav>
+        </section>
+      </div>
+
+      <section
+        className="dashboard-panel dashboard-recent"
+        aria-labelledby="recent-heading"
+      >
+        <div className="dashboard-panel-heading">
+          <div>
+            <p className="card-kicker">Latest updates</p>
+            <h2 id="recent-heading">Recent activity</h2>
+          </div>
+          <a className="dashboard-text-link" href="#activity">
+            View all
+          </a>
+        </div>
+        {events.length ? (
+          <ol className="dashboard-recent-list">
+            {events.slice(0, 4).map((event) => {
+              const presented = presentEvent(
+                event,
+                event.instanceId
+                  ? titleForRecipe(recipes, event.instanceId)
+                  : "Spare"
+              );
+              return (
+                <li key={event.id}>
+                  <StatusIcon
+                    tone={
+                      event.level === "error"
+                        ? "failed"
+                        : event.level === "warning"
+                          ? "degraded"
+                          : "healthy"
+                    }
+                  />
+                  <span>
+                    <strong>{presented.summary}</strong>
+                    <small>{formatTime(event.createdAt)}</small>
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
         ) : (
-          <>
-            <InstanceView
-              instance={instance}
-              recipe={activeRecipe}
-              machine={data.machine}
-              qrCode={qrCode}
-              shareURL={shareURL}
-              working={working}
-              onStart={() => void changeState("start")}
-              onStop={() => void changeState("stop")}
-            />
-            <RecipesView
-              recipes={data.recipes}
-              installedRecipeID={instance?.recipeId}
-            />
-            {data.machine && <MachineView machine={data.machine} />}
-            <ActivityView events={data.events} recipes={data.recipes} />
-          </>
+          <p className="empty-copy">
+            No activity yet. Changes will appear here as they happen.
+          </p>
         )}
-      </main>
-    </>
+      </section>
+    </section>
   );
 }
 
@@ -227,9 +592,14 @@ function InstanceView({
   onStart: () => void;
   onStop: () => void;
 }) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
+
   if (!instance) {
     return (
-      <section id="instance" className="view instance-view">
+      <section
+        id="transfer"
+        className="dashboard-page view instance-view dashboard-transfer-page"
+      >
         <div className="hero">
           <p className="eyebrow">
             <StatusIcon tone="ready" /> Ready
@@ -265,61 +635,130 @@ function InstanceView({
   }
 
   const title = recipe?.title ?? sentenceCase(instance.recipeId);
-  const running = ["starting", "healthy", "degraded"].includes(instance.status);
+  const running =
+    instance.desiredState === "running" && instance.status !== "stopped";
   const tone = instance.status === "healthy" ? "healthy" : instance.status;
+  const machineName = machine
+    ? displayMachineName(machine.hostname)
+    : "this Spare computer";
+  const failure = instance.problem
+    ? presentProblem(instance, title)
+    : undefined;
 
   return (
-    <section id="instance" className="view instance-view">
+    <section
+      id="transfer"
+      className="dashboard-page view instance-view dashboard-transfer-page"
+    >
       <div className="hero">
         <p className={`eyebrow status-${tone}`}>
-          <StatusIcon tone={tone} /> {statusLabels[instance.status]}
+          <span className="dashboard-desktop-copy">
+            <StatusIcon tone={tone} /> {statusLabels[instance.status]}
+          </span>
+          <span className="dashboard-mobile-copy">{title}</span>
         </p>
-        <h1>{machine?.hostname ?? "This Spare computer"} is a {title}</h1>
-        <p className="lede">
-          {instance.status === "healthy"
-            ? remoteReadyMessage(instance, machine)
-            : instance.problem?.summary ??
-              `Spare is preparing ${title} for this computer and the local network.`}
-        </p>
-        {instance.problem && (
-          <p className="recovery">{instance.problem.recovery}</p>
+        <h1>
+          <span className="dashboard-desktop-copy">
+            {machineName} is a {title}
+          </span>
+          <span className="dashboard-mobile-copy">
+            {instance.recipeId === "drop"
+              ? `Send files to ${machineName}`
+              : `Open ${title} on ${machineName}`}
+          </span>
+        </h1>
+        {failure ? (
+          <section
+            className="dashboard-job-failure"
+            aria-labelledby="dashboard-job-failure-heading"
+          >
+            <h2 id="dashboard-job-failure-heading">{failure.title}</h2>
+            <p>{failure.explanation}</p>
+          </section>
+        ) : (
+          <p className="lede">
+            {instance.status === "healthy"
+              ? remoteReadyMessage(instance, machine)
+              : `Spare is preparing ${title} for this computer and the local network.`}
+          </p>
         )}
         <div className="actions" aria-label={`${title} controls`}>
-          {instance.status === "healthy" && (
-            <a
-              className="button button-primary"
-              href={instance.urls[0]}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Open {title}
-              <span className="sr-only"> in a new tab</span>
-            </a>
-          )}
-          {!running && (
-            <button
-              className="button button-primary"
-              type="button"
-              onClick={onStart}
-              disabled={working}
-            >
-              Start {title}
-            </button>
-          )}
-          {running && (
-            <button
-              className="button button-secondary"
-              type="button"
-              onClick={onStop}
-              disabled={working}
-            >
-              Stop {title}
-            </button>
+          {failure ? (
+            <>
+              <button
+                className="button button-primary"
+                type="button"
+                onClick={onStart}
+                disabled={working}
+              >
+                Run repair
+              </button>
+              <button
+                className="button button-secondary"
+                type="button"
+                onClick={() => {
+                  setDetailsOpen(true);
+                  window.requestAnimationFrame(() => {
+                    document
+                      .getElementById("instance-details")
+                      ?.scrollIntoView({ block: "nearest" });
+                  });
+                }}
+              >
+                View details
+              </button>
+              <button
+                className="button button-secondary"
+                type="button"
+                onClick={onStop}
+                disabled={working}
+              >
+                Stop {title}
+              </button>
+            </>
+          ) : (
+            <>
+              {instance.status === "healthy" && (
+                <a
+                  className="button button-primary"
+                  href={shareURL || instance.urls[0]}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <span className="dashboard-desktop-copy">Open {title}</span>
+                  <span className="dashboard-mobile-copy">
+                    {instance.recipeId === "drop"
+                      ? "Choose files"
+                      : `Open ${title}`}
+                  </span>
+                  <span className="sr-only"> in a new tab</span>
+                </a>
+              )}
+              {!running ? (
+                <button
+                  className="button button-primary"
+                  type="button"
+                  onClick={onStart}
+                  disabled={working}
+                >
+                  Start {title}
+                </button>
+              ) : (
+                <button
+                  className="button button-secondary"
+                  type="button"
+                  onClick={onStop}
+                  disabled={working}
+                >
+                  Stop {title}
+                </button>
+              )}
+            </>
           )}
         </div>
         <p className="remote-notice">
-          You are controlling {machine?.hostname ?? "this Spare computer"}.
-          Folder selection, installation, and removal stay on that computer.
+          You are accessing {machineName} from another device. Folder
+          selection, installation, and removal stay on that computer.
         </p>
       </div>
 
@@ -395,7 +834,12 @@ function InstanceView({
         </section>
       </div>
 
-      <details className="details-card">
+      <details
+        id="instance-details"
+        className="details-card"
+        open={detailsOpen}
+        onToggle={(event) => setDetailsOpen(event.currentTarget.open)}
+      >
         <summary>Show instance details</summary>
         <dl>
           <Detail label="Recipe" value={`${title} ${instance.version}`} />
@@ -404,7 +848,7 @@ function InstanceView({
           {instance.dataPath && (
             <Detail label="Folder" value={instance.dataPath} path />
           )}
-          <Detail label="Port" value={String(instance.port)} />
+          <Detail label="Port" value={String(instance.port)} technical />
           {machine && (
             <Detail
               label="System"
@@ -425,12 +869,16 @@ function RecipesView({
   installedRecipeID?: string;
 }) {
   return (
-    <section id="recipes" className="view" aria-labelledby="recipes-heading">
+    <section
+      id="recipes"
+      className="dashboard-page view dashboard-recipes-page"
+      aria-labelledby="recipes-heading"
+    >
       <div className="section-heading">
         <p className="eyebrow">Built in and trusted</p>
-        <h2 id="recipes-heading">Recipes</h2>
+        <h1 id="recipes-heading">Jobs</h1>
         <p>
-          Recipes describe useful outcomes. Installation and folder selection
+          Jobs describe useful outcomes. Installation and folder selection
           stay in the CLI for this preview.
         </p>
       </div>
@@ -500,39 +948,30 @@ function MachineView({ machine }: { machine: Machine }) {
     ["External storage detected", machine.capabilities.hasExternalStorage]
   ] as const;
   return (
-    <section id="machine" className="view" aria-labelledby="machine-heading">
+    <section
+      id="machine"
+      className="dashboard-page view dashboard-machine-page"
+      aria-labelledby="machine-heading"
+    >
       <div className="section-heading">
         <p className="eyebrow">Capability profile</p>
-        <h2 id="machine-heading">Machine</h2>
+        <h1 id="machine-heading">Computer</h1>
         <p>
           Spare uses this profile to explain which recipes suit this computer.
         </p>
       </div>
-      <div className="card machine-card">
-        <ul className="capability-list">
-          {capabilities.map(([label, available]) => (
-            <li key={label}>
-              <span aria-hidden="true">{available ? "✓" : "—"}</span>
-              <span>{label}</span>
-              <strong>{available ? "Available" : "Unavailable"}</strong>
-            </li>
-          ))}
-        </ul>
-        {machine.capabilities.hasBattery && (
-          <p className="inline-warning">
-            <span aria-hidden="true">△</span> This computer may sleep when its
-            lid is closed.
-          </p>
-        )}
-      </div>
-      <details className="details-card">
-        <summary>Show computer details</summary>
-        <dl>
+      <section
+        className="machine-details-section"
+        aria-labelledby="machine-details-heading"
+      >
+        <div className="machine-section-heading">
+          <p className="card-kicker">System profile</p>
+          <h2 id="machine-details-heading">Computer details</h2>
+        </div>
+        <dl className="machine-detail-grid">
           <Detail label="Name" value={machine.hostname} />
-          <Detail
-            label="System"
-            value={`${machine.os}/${machine.architecture}`}
-          />
+          <Detail label="System" value={machine.os} />
+          <Detail label="Architecture" value={machine.architecture} />
           <Detail
             label="CPU"
             value={`${machine.logicalCores} logical cores`}
@@ -542,8 +981,61 @@ function MachineView({ machine }: { machine: Machine }) {
             label="Available system storage"
             value={formatBytes(machine.storageAvailableBytes)}
           />
+          <Detail
+            label="Network"
+            value={machine.lanAddresses.join(", ") || "Unavailable"}
+            technical
+          />
+          <Detail
+            label="Battery"
+            value={
+              machine.capabilities.hasBattery
+                ? "Battery powered"
+                : "No battery"
+            }
+          />
+          <Detail
+            label="External drives"
+            value={
+              machine.capabilities.hasExternalStorage
+                ? "Detected"
+                : "None detected"
+            }
+          />
+          <Detail
+            label="Container support"
+            value={
+              machine.capabilities.canRunContainers
+                ? "Available"
+                : "Unavailable"
+            }
+          />
         </dl>
-      </details>
+      </section>
+      <section
+        className="card machine-card"
+        aria-labelledby="machine-capabilities-heading"
+      >
+        <div className="machine-section-heading">
+          <p className="card-kicker">Recipe support</p>
+          <h2 id="machine-capabilities-heading">Capabilities</h2>
+        </div>
+        <ul className="capability-list">
+          {capabilities.map(([label, available]) => (
+            <li key={label}>
+              <span aria-hidden="true">{available ? "✓" : "—"}</span>
+              <span>{label}</span>
+              <strong>{available ? "Available" : "Unavailable"}</strong>
+            </li>
+          ))}
+        </ul>
+      {machine.capabilities.hasBattery && (
+        <p className="inline-warning">
+          <span aria-hidden="true">△</span> This computer may sleep when its
+          lid is closed.
+        </p>
+      )}
+      </section>
     </section>
   );
 }
@@ -556,39 +1048,49 @@ function ActivityView({
   recipes: Recipe[];
 }) {
   return (
-    <section id="activity" className="view" aria-labelledby="activity-heading">
+    <section
+      id="activity"
+      className="dashboard-page view dashboard-activity-page"
+      aria-labelledby="activity-heading"
+    >
       <div className="section-heading">
-        <p className="eyebrow">Recent changes</p>
-        <h2 id="activity-heading">Activity</h2>
-        <p>Starts, stops, failures, recovery, and port changes appear here.</p>
+        <p className="eyebrow">System history</p>
+        <h1 id="activity-heading">Activity</h1>
+        <p>A human-readable history of what this computer has done.</p>
       </div>
       <div className="card activity-card">
         {events.length ? (
           <ol className="activity-list">
-            {events.map((event) => (
-              <li key={event.id}>
-                <StatusIcon
-                  tone={
-                    event.level === "error"
-                      ? "failed"
-                      : event.level === "warning"
-                        ? "degraded"
-                        : "healthy"
-                  }
-                />
-                <div>
-                  <strong>
-                    {event.instanceId
-                      ? titleForRecipe(recipes, event.instanceId)
-                      : "Spare"}
-                  </strong>
-                  <p>{event.message}</p>
-                  <time dateTime={event.createdAt}>
-                    {formatTime(event.createdAt)}
-                  </time>
-                </div>
-              </li>
-            ))}
+            {events.map((event) => {
+              const presented = presentEvent(
+                event,
+                event.instanceId
+                  ? titleForRecipe(recipes, event.instanceId)
+                  : "Spare"
+              );
+              return (
+                <li key={event.id}>
+                  <StatusIcon
+                    tone={
+                      event.level === "error"
+                        ? "failed"
+                        : event.level === "warning"
+                          ? "degraded"
+                          : "healthy"
+                    }
+                  />
+                  <div className="activity-row-content">
+                    <div className="activity-message">
+                      <strong>{presented.summary}</strong>
+                      {presented.detail && <p>{presented.detail}</p>}
+                    </div>
+                    <time dateTime={event.createdAt}>
+                      {formatTime(event.createdAt)}
+                    </time>
+                  </div>
+                </li>
+              );
+            })}
           </ol>
         ) : (
           <p className="empty-copy">
@@ -629,16 +1131,21 @@ function CommandCard({
 function Detail({
   label,
   value,
-  path = false
+  path = false,
+  technical = false
 }: {
   label: string;
   value: string;
   path?: boolean;
+  technical?: boolean;
 }) {
   return (
     <div>
       <dt>{label}</dt>
-      <dd className={path ? "path" : undefined} translate={path ? "no" : undefined}>
+      <dd
+        className={path || technical ? "technical-value" : undefined}
+        translate={path || technical ? "no" : undefined}
+      >
         {value}
       </dd>
     </div>
@@ -653,9 +1160,7 @@ function remoteReadyMessage(instance: Instance, machine?: Machine) {
   const host = machine?.hostname ?? "the Spare computer";
   switch (instance.recipeId) {
     case "drop":
-      return instance.dataPath
-        ? `Files are being saved to ${instance.dataPath} on ${host}.`
-        : `Nearby devices can upload and download files through ${host}.`;
+      return `Nearby devices can send files directly to ${displayMachineName(host)}.`;
     case "hook":
       return `Hook on ${host} is ready to receive, inspect, and replay webhook requests.`;
     default:
@@ -697,4 +1202,9 @@ function formatTime(value: string) {
 
 function sentenceCase(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function dashboardPageFromHash(): DashboardPage {
+  const candidate = window.location.hash.replace("#", "") as DashboardPage;
+  return dashboardPages.includes(candidate) ? candidate : "overview";
 }

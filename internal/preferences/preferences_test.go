@@ -11,11 +11,13 @@ func TestDesktopPreferencesDefaultAndRoundTrip(t *testing.T) {
 	root := t.TempDir()
 	defaults := Load(root)
 	if !defaults.Notifications || !defaults.ShowInMenuBar ||
-		!defaults.KeepRecipesRunningAfterLogin || defaults.OpenAfterLogin {
+		!defaults.KeepRecipesRunningAfterLogin || defaults.OpenAfterLogin ||
+		defaults.Theme != "dark" {
 		t.Fatalf("unexpected defaults: %#v", defaults)
 	}
 
 	expected := Defaults()
+	expected.Theme = "light"
 	expected.OpenAfterLogin = true
 	expected.KeepRecipesRunningAfterLogin = false
 	expected.Notifications = false
@@ -48,11 +50,26 @@ func TestDesktopPreferencesPreserveNewDefaultsForOlderFiles(t *testing.T) {
 	}
 	loaded := Load(root)
 	if loaded.Notifications || loaded.ShowInMenuBar ||
+		loaded.Theme != "dark" ||
 		!loaded.KeepRecipesRunningAfterLogin ||
 		!loaded.RecipeNotifications["drop"] ||
 		!loaded.RecipeNotifications["site"] ||
 		!loaded.RecipeNotifications["hook"] {
 		t.Fatalf("older preference migration = %#v", loaded)
+	}
+}
+
+func TestDesktopPreferencesNormalizeRemovedTheme(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(root, "desktop.json"),
+		[]byte(`{"theme":"clear"}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if loaded := Load(root); loaded.Theme != "dark" {
+		t.Fatalf("removed theme normalized to %q, want dark", loaded.Theme)
 	}
 }
 

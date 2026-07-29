@@ -122,7 +122,7 @@ const hookPage = `<!doctype html>
     }
     .endpoint-label { display: block; margin-block-end: .4rem; color: var(--muted); font-size: .78rem; font-weight: 650; }
     code, pre, .request-path {
-      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-family: "Geist Mono", "IBM Plex Mono", monospace;
       font-variant-ligatures: none;
     }
     #endpoint { display: block; overflow-wrap: anywhere; }
@@ -230,7 +230,7 @@ const hookPage = `<!doctype html>
     .headers { display: grid; gap: .8rem; margin: 0; }
     .header-row { display: grid; grid-template-columns: minmax(7rem, .35fr) minmax(0, 1fr); gap: 1rem; }
     .headers dt { color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
-    .headers dd { min-width: 0; margin: 0; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .82rem; overflow-wrap: anywhere; }
+    .headers dd { min-width: 0; margin: 0; font-family: "Geist Mono", "IBM Plex Mono", monospace; font-size: .82rem; overflow-wrap: anywhere; }
     .replay-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: .75rem; }
     .field { display: grid; gap: .5rem; }
     label { font-size: .86rem; font-weight: 650; }
@@ -253,7 +253,7 @@ const hookPage = `<!doctype html>
     .replay-state { font-weight: 700; }
     .replay-state.completed { color: var(--success); }
     .replay-state.failed { color: var(--danger); }
-    .replay-target { margin: .55rem 0 0; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .8rem; overflow-wrap: anywhere; }
+    .replay-target { margin: .55rem 0 0; font-family: "Geist Mono", "IBM Plex Mono", monospace; font-size: .8rem; overflow-wrap: anywhere; }
     .replay-error { margin: .55rem 0 0; color: var(--danger); font-size: .85rem; }
     .replay-response { margin-block-start: .75rem; }
     .sr-only {

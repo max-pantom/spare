@@ -220,7 +220,7 @@ const viewerPage = `<!doctype html>
       padding: 1rem;
       background: var(--ink);
       color: oklch(0.96 0.01 145);
-      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-family: "Geist Mono", "IBM Plex Mono", monospace;
       font-size: .82rem;
       line-height: 1.55;
       tab-size: 2;
@@ -247,7 +247,7 @@ const viewerPage = `<!doctype html>
     .no-preview { margin-block-start: 1rem; border-radius: 1rem; padding: 1.3rem; background: var(--surface-muted); }
     .no-preview strong { display: block; }
     .no-preview p { margin: .45rem 0 0; color: var(--muted); line-height: 1.5; }
-    code { font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; font-variant-ligatures: none; }
+    code { font-family: "Geist Mono", "IBM Plex Mono", monospace; font-variant-ligatures: none; }
     [hidden] { display: none !important; }
     @media (prefers-reduced-motion: no-preference) {
       .file-button { transition-property: background-color, scale; transition-duration: 130ms; transition-timing-function: ease-out; }

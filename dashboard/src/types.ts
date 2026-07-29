@@ -103,7 +103,10 @@ export type APIError = {
   };
 };
 
+export type DesktopTheme = "dark" | "light";
+
 export type DesktopPreferences = {
+  theme: DesktopTheme;
   notifications: boolean;
   recipeNotifications: Record<string, boolean>;
   openAfterLogin: boolean;

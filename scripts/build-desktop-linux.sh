@@ -49,6 +49,7 @@ CGO_ENABLED=1 GOARCH="$TARGET_ARCH" go build -trimpath \
 cp "$PROJECT_ROOT/desktop/build/linux/install.sh" "$PACKAGE_ROOT/install.sh"
 cp "$PROJECT_ROOT/desktop/build/linux/uninstall.sh" "$PACKAGE_ROOT/uninstall.sh"
 cp "$PROJECT_ROOT/desktop/build/linux/spare-mime.xml" "$PACKAGE_ROOT/spare-mime.xml"
+cp "$PROJECT_ROOT/desktop/icons/app-icon.svg" "$PACKAGE_ROOT/app-icon.svg"
 chmod 755 "$PACKAGE_ROOT/install.sh" "$PACKAGE_ROOT/uninstall.sh"
 printf '%s\n' "$RELEASE_VERSION" > "$PACKAGE_ROOT/VERSION"
 for recipe_id in site drop hook; do
@@ -56,7 +57,7 @@ for recipe_id in site drop hook; do
 done
 
 rm -f "$ARCHIVE"
-tar -C "$PACKAGE_ROOT" -czf "$ARCHIVE" Spare spared bin recipes install.sh uninstall.sh spare-mime.xml VERSION
+tar -C "$PACKAGE_ROOT" -czf "$ARCHIVE" Spare spared bin recipes install.sh uninstall.sh spare-mime.xml app-icon.svg VERSION
 (
   cd "$PROJECT_ROOT/dist/desktop"
   for desktop_archive in spare-desktop_*.zip spare-desktop_*.tar.gz; do

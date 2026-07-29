@@ -7,7 +7,7 @@ package desktop
 #include <stdlib.h>
 
 void spare_linux_tray_start(void);
-void spare_linux_tray_update(const char *status, const char *openLabel, const char *toggleLabel, int hasInstance, int running);
+void spare_linux_tray_update(const char *headline, const char *status, const char *openLabel, const char *toggleLabel, int hasInstance, int isDrop, int hasAddress, int needsAttention, int canReconnect, int iconState);
 void spare_linux_tray_set_visible(int visible);
 void spare_linux_tray_stop(void);
 */
@@ -40,36 +40,27 @@ func (t *linuxTray) Start(app *App) {
 }
 
 func (t *linuxTray) Update(snapshot Snapshot) {
-	status := "No active job"
-	openLabel := "Choose a job"
-	toggleLabel := ""
-	hasInstance := 0
-	running := 0
-	if len(snapshot.Instances) > 0 {
-		instance := snapshot.Instances[0]
-		title := instance.RecipeID
-		for _, recipe := range snapshot.Recipes {
-			if recipe.ID == instance.RecipeID {
-				title = recipe.Title
-				break
-			}
-		}
-		status = title + " · " + string(instance.Status)
-		openLabel = "Open " + title
-		toggleLabel = "Start " + title
-		hasInstance = 1
-		if instance.DesiredState == "running" {
-			running = 1
-			toggleLabel = "Pause " + title
-		}
-	}
-	cStatus := C.CString(status)
-	cOpen := C.CString(openLabel)
-	cToggle := C.CString(toggleLabel)
+	presentation := presentTray(snapshot)
+	cHeadline := C.CString(presentation.Headline)
+	cStatus := C.CString(presentation.Status)
+	cOpen := C.CString(presentation.OpenLabel)
+	cToggle := C.CString(presentation.ToggleLabel)
+	defer C.free(unsafe.Pointer(cHeadline))
 	defer C.free(unsafe.Pointer(cStatus))
 	defer C.free(unsafe.Pointer(cOpen))
 	defer C.free(unsafe.Pointer(cToggle))
-	C.spare_linux_tray_update(cStatus, cOpen, cToggle, C.int(hasInstance), C.int(running))
+	C.spare_linux_tray_update(
+		cHeadline,
+		cStatus,
+		cOpen,
+		cToggle,
+		C.int(boolInt(presentation.HasInstance)),
+		C.int(boolInt(presentation.IsDrop)),
+		C.int(boolInt(presentation.Address != "")),
+		C.int(boolInt(presentation.NeedsAttention)),
+		C.int(boolInt(presentation.CanReconnect)),
+		C.int(presentation.IconState),
+	)
 }
 
 func (*linuxTray) SetVisible(visible bool) {

@@ -7,7 +7,7 @@ package desktop
 #include <stdlib.h>
 
 void spare_tray_start(void);
-void spare_tray_update(const char *status, const char *openLabel, const char *toggleLabel, int hasInstance, int running);
+void spare_tray_update(const char *headline, const char *status, const char *openLabel, const char *toggleLabel, int hasInstance, int isDrop, int hasAddress, int needsAttention, int canReconnect, int iconState);
 void spare_tray_set_visible(int visible);
 void spare_tray_stop(void);
 */
@@ -40,37 +40,27 @@ func (t *darwinTray) Start(app *App) {
 }
 
 func (t *darwinTray) Update(snapshot Snapshot) {
-	status := "No active job"
-	openLabel := "Choose a job"
-	toggleLabel := ""
-	hasInstance := 0
-	running := 0
-	if len(snapshot.Instances) > 0 {
-		instance := snapshot.Instances[0]
-		title := instance.RecipeID
-		for _, recipe := range snapshot.Recipes {
-			if recipe.ID == instance.RecipeID {
-				title = recipe.Title
-				break
-			}
-		}
-		status = title + " · " + instance.Status
-		openLabel = "Open " + title
-		hasInstance = 1
-		if instance.DesiredState == "running" {
-			running = 1
-			toggleLabel = "Pause " + title
-		} else {
-			toggleLabel = "Start " + title
-		}
-	}
-	cStatus := C.CString(status)
-	cOpen := C.CString(openLabel)
-	cToggle := C.CString(toggleLabel)
+	presentation := presentTray(snapshot)
+	cHeadline := C.CString(presentation.Headline)
+	cStatus := C.CString(presentation.Status)
+	cOpen := C.CString(presentation.OpenLabel)
+	cToggle := C.CString(presentation.ToggleLabel)
+	defer C.free(unsafe.Pointer(cHeadline))
 	defer C.free(unsafe.Pointer(cStatus))
 	defer C.free(unsafe.Pointer(cOpen))
 	defer C.free(unsafe.Pointer(cToggle))
-	C.spare_tray_update(cStatus, cOpen, cToggle, C.int(hasInstance), C.int(running))
+	C.spare_tray_update(
+		cHeadline,
+		cStatus,
+		cOpen,
+		cToggle,
+		trayBool(presentation.HasInstance),
+		trayBool(presentation.IsDrop),
+		trayBool(presentation.Address != ""),
+		trayBool(presentation.NeedsAttention),
+		trayBool(presentation.CanReconnect),
+		C.int(presentation.IconState),
+	)
 }
 
 func (*darwinTray) SetVisible(visible bool) {
@@ -97,4 +87,11 @@ func spareTrayAction(action *C.char) {
 		return
 	}
 	tray.app.handleTrayAction(C.GoString(action))
+}
+
+func trayBool(value bool) C.int {
+	if value {
+		return 1
+	}
+	return 0
 }

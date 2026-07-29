@@ -36,12 +36,15 @@ const (
 	tpmRightButton = 0x0002
 	tpmReturnCmd   = 0x0100
 
-	cmdOpenRecipe = 1001
-	cmdShare      = 1002
-	cmdToggle     = 1003
-	cmdActivity   = 1004
-	cmdOpenSpare  = 1005
-	cmdQuit       = 1006
+	cmdOpenRecipe  = 1001
+	cmdShare       = 1002
+	cmdToggle      = 1003
+	cmdOpenFiles   = 1004
+	cmdCopyAddress = 1005
+	cmdOpenSpare   = 1006
+	cmdSettings    = 1007
+	cmdReconnect   = 1008
+	cmdQuit        = 1009
 )
 
 var (
@@ -239,17 +242,10 @@ func (t *windowsTray) updateIcon(operation uintptr) {
 	if window == 0 || (operation != nimDelete && !visible) {
 		return
 	}
-	status := "Spare · No active job"
-	if len(snapshot.Instances) > 0 {
-		instance := snapshot.Instances[0]
-		title := instance.RecipeID
-		for _, recipe := range snapshot.Recipes {
-			if recipe.ID == instance.RecipeID {
-				title = recipe.Title
-				break
-			}
-		}
-		status = "Spare · " + title + " · " + string(instance.Status)
+	presentation := presentTray(snapshot)
+	status := "Spare · " + presentation.Headline
+	if presentation.Status != "" {
+		status += " · " + presentation.Status
 	}
 	data := windowsNotifyIconData{
 		Size:            uint32(unsafe.Sizeof(windowsNotifyIconData{})),
@@ -303,37 +299,36 @@ func (t *windowsTray) showMenu() {
 	defer procDestroyMenu.Call(menu)
 
 	appendWindowsMenu(menu, 0, "Spare", false)
-	status := "No active job"
-	openLabel := "Choose a job"
-	toggleLabel := ""
-	if len(snapshot.Instances) > 0 {
-		instance := snapshot.Instances[0]
-		title := instance.RecipeID
-		for _, recipe := range snapshot.Recipes {
-			if recipe.ID == instance.RecipeID {
-				title = recipe.Title
-				break
-			}
-		}
-		status = title + " · " + string(instance.Status)
-		openLabel = "Open " + title
-		if instance.DesiredState == "running" {
-			toggleLabel = "Pause " + title
-		} else {
-			toggleLabel = "Start " + title
-		}
+	presentation := presentTray(snapshot)
+	appendWindowsMenu(menu, 0, presentation.Headline, false)
+	if presentation.Status != "" {
+		appendWindowsMenu(menu, 0, presentation.Status, false)
 	}
-	appendWindowsMenu(menu, 0, status, false)
 	appendWindowsSeparator(menu)
-	appendWindowsMenu(menu, cmdOpenRecipe, openLabel, true)
-	if len(snapshot.Instances) > 0 {
+	if presentation.NeedsAttention {
+		if presentation.CanReconnect {
+			appendWindowsMenu(menu, cmdReconnect, "Reconnect", true)
+		}
+	} else if presentation.HasInstance {
 		appendWindowsMenu(menu, cmdShare, "Show QR", true)
-		appendWindowsMenu(menu, cmdToggle, toggleLabel, true)
-		appendWindowsMenu(menu, cmdActivity, "Recent activity", true)
+		if presentation.IsDrop {
+			appendWindowsMenu(menu, cmdOpenFiles, presentation.OpenLabel, true)
+		} else {
+			appendWindowsMenu(menu, cmdOpenRecipe, presentation.OpenLabel, true)
+		}
+		if presentation.Address != "" {
+			appendWindowsMenu(menu, cmdCopyAddress, "Copy address", true)
+		}
+		appendWindowsMenu(menu, cmdToggle, presentation.ToggleLabel, true)
+	} else {
+		appendWindowsMenu(menu, cmdOpenRecipe, presentation.OpenLabel, true)
+	}
+	if !presentation.NeedsAttention || presentation.CanReconnect {
+		appendWindowsSeparator(menu)
 	}
 	appendWindowsMenu(menu, cmdOpenSpare, "Open Spare", true)
-	appendWindowsSeparator(menu)
-	appendWindowsMenu(menu, cmdQuit, "Quit Spare", true)
+	appendWindowsMenu(menu, cmdSettings, "Settings", true)
+	appendWindowsMenu(menu, cmdQuit, "Quit", true)
 
 	var point windowsPoint
 	procGetCursorPos.Call(uintptr(unsafe.Pointer(&point)))
@@ -368,10 +363,16 @@ func (t *windowsTray) runCommand(command uint16) {
 		action = "share"
 	case cmdToggle:
 		action = "toggle"
-	case cmdActivity:
-		action = "activity"
+	case cmdOpenFiles:
+		action = "open_files"
+	case cmdCopyAddress:
+		action = "copy_address"
 	case cmdOpenSpare:
 		action = "open_spare"
+	case cmdSettings:
+		action = "settings"
+	case cmdReconnect:
+		action = "reconnect"
 	case cmdQuit:
 		action = "quit"
 	}

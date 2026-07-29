@@ -5,6 +5,7 @@ SOURCE_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 INSTALL_ROOT=${SPARE_DESKTOP_INSTALL_DIR:-"$HOME/.local/lib/spare"}
 BIN_ROOT="$HOME/.local/bin"
 APPLICATIONS_ROOT="${XDG_DATA_HOME:-"$HOME/.local/share"}/applications"
+ICONS_ROOT="${XDG_DATA_HOME:-"$HOME/.local/share"}/icons/hicolor/scalable/apps"
 case "$INSTALL_ROOT" in
   ""|"/"|"$HOME")
     echo "Refusing unsafe Spare install directory: $INSTALL_ROOT" >&2
@@ -12,19 +13,21 @@ case "$INSTALL_ROOT" in
     ;;
 esac
 
-for required in Spare spared bin/spare uninstall.sh spare-mime.xml; do
+for required in Spare spared bin/spare uninstall.sh spare-mime.xml app-icon.svg; do
   if [ ! -f "$SOURCE_ROOT/$required" ]; then
     echo "The Spare Desktop package is missing $required." >&2
     exit 1
   fi
 done
 
-mkdir -p "$INSTALL_ROOT/bin" "$INSTALL_ROOT/recipes" "$BIN_ROOT" "$APPLICATIONS_ROOT"
+mkdir -p "$INSTALL_ROOT/bin" "$INSTALL_ROOT/recipes" "$BIN_ROOT" "$APPLICATIONS_ROOT" "$ICONS_ROOT"
 cp "$SOURCE_ROOT/Spare" "$INSTALL_ROOT/Spare"
 cp "$SOURCE_ROOT/spared" "$INSTALL_ROOT/spared"
 cp "$SOURCE_ROOT/bin/spare" "$INSTALL_ROOT/bin/spare"
 cp "$SOURCE_ROOT/uninstall.sh" "$INSTALL_ROOT/uninstall.sh"
 cp "$SOURCE_ROOT/spare-mime.xml" "$INSTALL_ROOT/spare-mime.xml"
+cp "$SOURCE_ROOT/app-icon.svg" "$INSTALL_ROOT/app-icon.svg"
+cp "$SOURCE_ROOT/app-icon.svg" "$ICONS_ROOT/run.spare.desktop.svg"
 cp "$SOURCE_ROOT/VERSION" "$INSTALL_ROOT/VERSION"
 cp "$SOURCE_ROOT"/recipes/*.sp "$INSTALL_ROOT/recipes/"
 chmod 755 "$INSTALL_ROOT/Spare" "$INSTALL_ROOT/spared" "$INSTALL_ROOT/bin/spare" "$INSTALL_ROOT/uninstall.sh"
@@ -37,7 +40,7 @@ Type=Application
 Name=Spare
 Comment=Give this computer a job
 Exec="$INSTALL_ROOT/Spare" %f
-Icon=folder-publicshare-symbolic
+Icon=run.spare.desktop
 Terminal=false
 Categories=Utility;Network;
 MimeType=application/vnd.spare.recipe+zip;application/vnd.spare.backup+zip;

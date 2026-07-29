@@ -40,13 +40,13 @@ func main() {
 
 	err = wails.Run(&options.App{
 		Title:             "Spare",
-		Width:             1120,
-		Height:            760,
+		Width:             930,
+		Height:            509,
 		MinWidth:          320,
-		MinHeight:         560,
+		MinHeight:         480,
 		StartHidden:       startHidden,
 		HideWindowOnClose: true,
-		BackgroundColour:  options.NewRGB(245, 247, 244),
+		BackgroundColour:  options.NewRGB(28, 28, 28),
 		AssetServer: &assetserver.Options{
 			Assets: dashboard.Files(),
 		},
@@ -72,7 +72,8 @@ func main() {
 			DisableWebViewDrop: true,
 		},
 		Mac: &mac.Options{
-			TitleBar: mac.TitleBarDefault(),
+			TitleBar:   mac.TitleBarHidden(),
+			Appearance: mac.NSAppearanceNameDarkAqua,
 			About: &mac.AboutInfo{
 				Title:   "Spare " + version,
 				Message: "Give this computer a job.",
