@@ -77,13 +77,17 @@ func FreeLoopbackPort() (int, error) {
 }
 
 func Endpoints(hostname string, port int) []Endpoint {
+	return EndpointsForAddresses(hostname, port, profile.LANAddresses())
+}
+
+func EndpointsForAddresses(hostname string, port int, addresses []string) []Endpoint {
 	result := []Endpoint{{
 		Kind:     "loopback",
 		URL:      fmt.Sprintf("http://127.0.0.1:%d", port),
 		Hostname: "127.0.0.1",
 		Port:     port,
 	}}
-	for _, address := range profile.LANAddresses() {
+	for _, address := range addresses {
 		result = append(result, Endpoint{
 			Kind:     "lan",
 			URL:      "http://" + net.JoinHostPort(address, strconv.Itoa(port)),

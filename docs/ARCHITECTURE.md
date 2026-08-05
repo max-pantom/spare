@@ -129,6 +129,14 @@ Create flow:
 5. Prepare and start the selected runtime.
 6. Monitor the shared health endpoint and publish URLs.
 
+Before a native worker starts, the supervisor converts its trusted manifest
+permissions into an internal isolation policy. The native driver applies a
+macOS sandbox profile or Linux Landlock rules, places the process in a
+killable process group, and passes a minimal environment. Windows uses a
+restricted kill-on-close Job Object; AppContainer resource isolation remains
+release work. The Windows state root is separately protected with an explicit
+current-user-and-SYSTEM DACL.
+
 Installed desired state is persisted in SQLite. On daemon restoration, legacy
 Site rows are migrated to versioned runtime/config/data fields before launch.
 

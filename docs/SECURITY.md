@@ -222,6 +222,20 @@ Recipes run as child workers of the unprivileged per-user daemon. Each has a
 separate loopback health endpoint. Repeated failures trigger controlled
 restarts, and the crash-rate limit stops a repeatedly failing worker.
 
+The daemon derives each built-in worker's folder and network policy from its
+trusted manifest. macOS workers run through a deny-by-default Seatbelt profile;
+Linux workers apply Landlock filesystem rules before loading the recipe. Both
+use isolated process groups. Windows workers use a kill-on-close restricted Job
+Object, and the full Spare state tree receives a protected DACL limited to the
+current user and SYSTEM. Worker environments keep only required runtime values
+and do not inherit proxy settings or unrelated application secrets.
+
+Windows does not yet have per-worker AppContainer filesystem and network
+capabilities. Its Job Object contains child processes and UI access, but a
+built-in worker still has the current user's access outside Spare's private
+state. Only Spare-signed implementations compiled into the app can run in this
+preview.
+
 The macOS login agent creates private files by default. The Linux user service
 also removes ambient capabilities, blocks privilege gain, isolates temporary
 files, and enables available systemd process and kernel hardening. The Windows
@@ -238,9 +252,6 @@ coarse platform, job-state, package-signature, and diagnostic statuses, while
 excluding API tokens, hostnames, machine IDs, addresses, URLs, configuration,
 paths, logs, activity contents, backups, private job data, and files from
 user-selected folders.
-
-This preview does not provide a container, VM, or operating-system sandbox
-around built-in workers.
 
 ## Release security
 

@@ -60,8 +60,16 @@ func TestPrivateStateCheckDetectsAndRepairsBroadTokenPermissions(t *testing.T) {
 
 func TestWorkerIsolationCheckIsExplicit(t *testing.T) {
 	check := workerIsolationCheck()
-	if check.Status != "warning" || check.Recovery == "" {
+	if check.Status != "healthy" && (check.Status != "warning" || check.Recovery == "") {
 		t.Fatalf("check = %#v", check)
+	}
+}
+
+func TestMissingSelectedFolderHasRecoveryInstructions(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "disconnected drive", "Drop")
+	checks := storageChecks(model.Instance{ID: "drop", RecipeID: model.RecipeDrop, DataPath: missing})
+	if len(checks) != 1 || checks[0].Status != "failed" || checks[0].Recovery == "" {
+		t.Fatalf("missing-folder checks = %#v", checks)
 	}
 }
 

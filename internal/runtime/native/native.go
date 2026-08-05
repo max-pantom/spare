@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strconv"
 	"sync"
 
+	"github.com/spare-run/spare/internal/isolation"
 	"github.com/spare-run/spare/internal/model"
 	spareRuntime "github.com/spare-run/spare/internal/runtime"
 )
@@ -38,23 +40,38 @@ func (d *Driver) Start(ctx context.Context, instance model.Instance, healthPort 
 	if err != nil {
 		return nil, err
 	}
-	command := exec.CommandContext(
-		ctx,
-		d.Executable,
-		"worker",
+	workerArgs := []string{
 		"--recipe", instance.RecipeID,
 		"--config-stdin",
 		"--port", strconv.Itoa(instance.Port),
 		"--health-port", strconv.Itoa(healthPort),
 		"--data-path", instance.StatePath,
-	)
+	}
+	command, sandboxCleanup, err := isolation.Command(ctx, d.Executable, workerArgs, instance.Isolation)
+	if err != nil {
+		return nil, fmt.Errorf("prepare native worker isolation: %w", err)
+	}
 	command.Stdin = bytes.NewReader(configJSON)
 	command.Stdout = stdout
 	command.Stderr = stderr
 	if err := command.Start(); err != nil {
+		sandboxCleanup()
 		return nil, err
 	}
-	return &process{command: command}, nil
+	containCleanup, err := isolation.ContainProcess(command.Process)
+	if err != nil {
+		_ = isolation.Terminate(command.Process)
+		_ = command.Wait()
+		sandboxCleanup()
+		return nil, fmt.Errorf("contain native worker process: %w", err)
+	}
+	return &process{
+		command: command,
+		cleanup: func() {
+			containCleanup()
+			sandboxCleanup()
+		},
+	}, nil
 }
 
 func (d *Driver) Stop(_ context.Context, _ model.Instance, process spareRuntime.Process) error {
@@ -80,6 +97,8 @@ type process struct {
 	command *exec.Cmd
 	waited  bool
 	waitErr error
+	cleanup func()
+	cleaned sync.Once
 }
 
 func (p *process) Wait() error {
@@ -92,6 +111,7 @@ func (p *process) Wait() error {
 	command := p.command
 	p.mu.Unlock()
 	err := command.Wait()
+	p.cleaned.Do(p.cleanup)
 	p.mu.Lock()
 	p.waited = true
 	p.waitErr = err
@@ -105,7 +125,8 @@ func (p *process) Stop() error {
 	if p.waited || p.command == nil || p.command.Process == nil {
 		return nil
 	}
-	if err := p.command.Process.Kill(); err != nil && !errors.Is(err, exec.ErrNotFound) {
+	p.cleaned.Do(p.cleanup)
+	if err := isolation.Terminate(p.command.Process); err != nil && !errors.Is(err, exec.ErrNotFound) && !errors.Is(err, os.ErrProcessDone) {
 		return fmt.Errorf("stop native worker: %w", err)
 	}
 	return nil

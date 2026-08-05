@@ -21,6 +21,7 @@ import (
 	"github.com/spare-run/spare/internal/api"
 	"github.com/spare-run/spare/internal/auth"
 	"github.com/spare-run/spare/internal/dashboard"
+	"github.com/spare-run/spare/internal/isolation"
 	"github.com/spare-run/spare/internal/joblibrary"
 	"github.com/spare-run/spare/internal/jobpackage"
 	"github.com/spare-run/spare/internal/model"
@@ -38,6 +39,13 @@ import (
 var version = "dev"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "sandbox-worker" {
+		if err := isolation.Enter(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "worker" {
 		if err := runWorker(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)

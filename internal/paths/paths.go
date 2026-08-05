@@ -108,7 +108,7 @@ func (p Paths) Ensure() error {
 			return fmt.Errorf("secure Spare state directory: %w", err)
 		}
 	}
-	return nil
+	return SecurePrivateTree(p.Root)
 }
 
 func (p Paths) WriteEndpoint(endpoint Endpoint) error {

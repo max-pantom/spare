@@ -67,3 +67,51 @@ func TestExportRejectsRecipeWithoutSelectedFolder(t *testing.T) {
 		t.Fatalf("unexpected backup file: %v", statErr)
 	}
 }
+
+func TestExportAndImportUnicodePaths(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "Source folder 東京")
+	if err := os.MkdirAll(filepath.Join(source, "résumés"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "résumés", "你好 world.txt"), []byte("safe"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(t.TempDir(), "Spare backups 東京", "Drop résumé.spare-backup")
+	if err := Export(source, Manifest{Schema: SchemaV1, RecipeID: "drop"}, archive); err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(t.TempDir(), "Restored folder 東京")
+	if _, err := Import(archive, destination); err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(filepath.Join(destination, "résumés", "你好 world.txt"))
+	if err != nil || string(contents) != "safe" {
+		t.Fatalf("restored Unicode file = %q, %v", contents, err)
+	}
+}
+
+func TestFailedExportLeavesExistingBackupUntouched(t *testing.T) {
+	source := t.TempDir()
+	if err := os.Symlink("missing", filepath.Join(source, "interrupt")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	destinationDir := t.TempDir()
+	destination := filepath.Join(destinationDir, "drop.spare-backup")
+	if err := os.WriteFile(destination, []byte("previous-good-backup"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Export(source, Manifest{Schema: SchemaV1, RecipeID: "drop"}, destination); err == nil {
+		t.Fatal("expected export to fail after opening its temporary archive")
+	}
+	contents, err := os.ReadFile(destination)
+	if err != nil || string(contents) != "previous-good-backup" {
+		t.Fatalf("existing backup changed after failed export: %q, %v", contents, err)
+	}
+	entries, err := os.ReadDir(destinationDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "drop.spare-backup" {
+		t.Fatalf("partial backup was left behind: %#v", entries)
+	}
+}

@@ -73,6 +73,7 @@ type Manager struct {
 	closed    bool
 	waitDone  chan struct{}
 	available func(string) bool
+	endpoints func(string, int) []network.Endpoint
 }
 
 func New(
@@ -87,15 +88,16 @@ func New(
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	manager := &Manager{
-		store:    store,
-		logsDir:  logsDir,
-		machine:  machine,
-		registry: registry,
-		runtimes: runtimes,
-		workers:  map[string]*worker{},
-		ctx:      ctx,
-		cancel:   cancel,
-		waitDone: make(chan struct{}),
+		store:     store,
+		logsDir:   logsDir,
+		machine:   machine,
+		registry:  registry,
+		runtimes:  runtimes,
+		workers:   map[string]*worker{},
+		ctx:       ctx,
+		cancel:    cancel,
+		waitDone:  make(chan struct{}),
+		endpoints: network.Endpoints,
 	}
 	instances, err := store.Instances(context.Background())
 	if err != nil {
@@ -143,6 +145,9 @@ func (m *Manager) migrateInstance(stored model.Instance) (model.Instance, error)
 		stored.DataPath = stored.RootPath
 	}
 	stored.StatePath = filepath.Join(filepath.Dir(m.logsDir), "jobs", stored.RecipeID)
+	if err := applyWorkerIsolation(&stored, manifest); err != nil {
+		return model.Instance{}, err
+	}
 	return stored, nil
 }
 
@@ -420,6 +425,13 @@ func (m *Manager) Create(request CreateRequest) (model.Instance, error) {
 	if err := os.Chmod(candidate.StatePath, 0o700); err != nil {
 		return model.Instance{}, err
 	}
+	if err := applyWorkerIsolation(&candidate, manifest); err != nil {
+		return model.Instance{}, &ManagerError{
+			Code:    "worker_isolation_invalid",
+			Message: "Spare could not build the filesystem boundary for " + manifest.Name + ".",
+			Hint:    err.Error(),
+		}
+	}
 
 	m.mu.Lock()
 	if existing := m.onlyWorkerLocked(); existing != nil {
@@ -505,6 +517,57 @@ func (m *Manager) Create(request CreateRequest) (model.Instance, error) {
 	return m.decorate(current.instance), nil
 }
 
+func applyWorkerIsolation(instance *model.Instance, manifest recipe.Manifest) error {
+	policy := model.WorkerIsolation{
+		StatePath:     instance.StatePath,
+		AllowLocal:    manifest.Permissions.Network.Local,
+		AllowInternet: manifest.Permissions.Network.Internet,
+	}
+	readFields := append([]string(nil), manifest.Permissions.Filesystem.Read...)
+	readFields = append(readFields, manifest.Permissions.Filesystem.Write...)
+	for _, field := range readFields {
+		path, err := isolationPath(instance.Config, field)
+		if err != nil {
+			return err
+		}
+		policy.ReadPaths = appendUniquePath(policy.ReadPaths, path)
+	}
+	for _, field := range manifest.Permissions.Filesystem.Write {
+		path, err := isolationPath(instance.Config, field)
+		if err != nil {
+			return err
+		}
+		policy.WritePaths = appendUniquePath(policy.WritePaths, path)
+	}
+	instance.Isolation = policy
+	return nil
+}
+
+func isolationPath(config map[string]any, field string) (string, error) {
+	value, ok := config[field].(string)
+	if !ok || value == "" {
+		return "", fmt.Errorf("declared filesystem field %q is unavailable", field)
+	}
+	resolved, err := filepath.EvalSymlinks(value)
+	if err != nil {
+		return "", fmt.Errorf("resolve declared filesystem field %q: %w", field, err)
+	}
+	resolved, err = filepath.Abs(resolved)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(resolved), nil
+}
+
+func appendUniquePath(paths []string, value string) []string {
+	for _, current := range paths {
+		if current == value {
+			return paths
+		}
+	}
+	return append(paths, value)
+}
+
 func (m *Manager) List() []model.Instance {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -558,6 +621,14 @@ func (m *Manager) Configure(id string, request CreateRequest) (model.Instance, e
 		}
 	}
 	candidate.StatePath = oldInstance.StatePath
+	implementation, _ := m.registry.Get(candidate.RecipeID)
+	if err := applyWorkerIsolation(&candidate, implementation.Manifest()); err != nil {
+		return model.Instance{}, &ManagerError{
+			Code:    "worker_isolation_invalid",
+			Message: "Spare could not update the filesystem boundary for " + m.title(candidate.RecipeID) + ".",
+			Hint:    err.Error(),
+		}
+	}
 	driver, ok := m.runtimes[candidate.Runtime]
 	if !ok {
 		return model.Instance{}, &ManagerError{
@@ -1158,7 +1229,7 @@ func (m *Manager) eventLocked(current *worker, level, kind, message string, deta
 }
 
 func (m *Manager) decorate(instance model.Instance) model.Instance {
-	instance.URLs = network.URLs(network.Endpoints(m.machine.Hostname, instance.Port))
+	instance.URLs = network.URLs(m.endpoints(m.machine.Hostname, instance.Port))
 	return instance
 }
 

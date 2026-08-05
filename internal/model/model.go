@@ -139,27 +139,36 @@ type Problem struct {
 	Recovery string `json:"recovery"`
 }
 
+type WorkerIsolation struct {
+	ReadPaths     []string `json:"-"`
+	WritePaths    []string `json:"-"`
+	StatePath     string   `json:"-"`
+	AllowLocal    bool     `json:"-"`
+	AllowInternet bool     `json:"-"`
+}
+
 type Instance struct {
-	ID                    string         `json:"id"`
-	RecipeID              string         `json:"recipeId"`
-	Version               string         `json:"version"`
-	Runtime               string         `json:"runtime"`
-	Mode                  string         `json:"mode"`
-	DesiredState          string         `json:"desiredState"`
-	Status                string         `json:"status"`
-	RootPath              string         `json:"rootPath"`
-	DataPath              string         `json:"dataPath"`
-	StatePath             string         `json:"-"`
-	Config                map[string]any `json:"config"`
-	Port                  int            `json:"port"`
-	PortMode              string         `json:"portMode"`
-	URLs                  []string       `json:"urls"`
-	StorageAvailableBytes uint64         `json:"storageAvailableBytes"`
-	ItemCount             int            `json:"itemCount"`
-	StartedAt             *time.Time     `json:"startedAt,omitempty"`
-	CreatedAt             time.Time      `json:"createdAt"`
-	UpdatedAt             time.Time      `json:"updatedAt"`
-	Problem               *Problem       `json:"problem,omitempty"`
+	ID                    string          `json:"id"`
+	RecipeID              string          `json:"recipeId"`
+	Version               string          `json:"version"`
+	Runtime               string          `json:"runtime"`
+	Mode                  string          `json:"mode"`
+	DesiredState          string          `json:"desiredState"`
+	Status                string          `json:"status"`
+	RootPath              string          `json:"rootPath"`
+	DataPath              string          `json:"dataPath"`
+	StatePath             string          `json:"-"`
+	Config                map[string]any  `json:"config"`
+	Port                  int             `json:"port"`
+	PortMode              string          `json:"portMode"`
+	URLs                  []string        `json:"urls"`
+	StorageAvailableBytes uint64          `json:"storageAvailableBytes"`
+	ItemCount             int             `json:"itemCount"`
+	StartedAt             *time.Time      `json:"startedAt,omitempty"`
+	CreatedAt             time.Time       `json:"createdAt"`
+	UpdatedAt             time.Time       `json:"updatedAt"`
+	Problem               *Problem        `json:"problem,omitempty"`
+	Isolation             WorkerIsolation `json:"-"`
 }
 
 type Event struct {

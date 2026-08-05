@@ -88,11 +88,20 @@ func RunSecurity(ctx context.Context, client *api.Client, statePaths paths.Paths
 
 func privateStateCheck(statePaths paths.Paths) Check {
 	if runtime.GOOS == "windows" {
+		if err := paths.VerifyPrivateTree(statePaths.Root); err != nil {
+			return Check{
+				ID:       "security.state",
+				Name:     "Private state",
+				Status:   "failed",
+				Message:  "Spare state is not restricted to the current Windows user.",
+				Recovery: "Run `spare init` to replace inherited access with owner-only Windows ACLs.",
+			}
+		}
 		return Check{
 			ID:      "security.state",
 			Name:    "Private state",
-			Status:  "ready",
-			Message: "Spare state is stored under the current user's local application data.",
+			Status:  "healthy",
+			Message: "Credentials, logs, packages, and job data use a protected current-user Windows ACL.",
 		}
 	}
 	for _, candidate := range []struct {
@@ -201,11 +210,36 @@ func executableIntegrityCheck() Check {
 }
 
 func workerIsolationCheck() Check {
+	if runtime.GOOS == "darwin" {
+		return Check{
+			ID:      "security.isolation",
+			Name:    "Worker isolation",
+			Status:  "healthy",
+			Message: "Built-in workers use a deny-by-default macOS sandbox with manifest-derived folder and network access.",
+		}
+	}
+	if runtime.GOOS == "linux" {
+		return Check{
+			ID:      "security.isolation",
+			Name:    "Worker isolation",
+			Status:  "healthy",
+			Message: "Built-in workers use Landlock filesystem isolation and a dedicated process group.",
+		}
+	}
+	if runtime.GOOS == "windows" {
+		return Check{
+			ID:       "security.isolation",
+			Name:     "Worker isolation",
+			Status:   "warning",
+			Message:  "Built-in workers use a restricted Job Object, but per-worker filesystem isolation is not complete.",
+			Recovery: "Run only Spare-signed built-in jobs until AppContainer filesystem enforcement is added.",
+		}
+	}
 	return Check{
 		ID:       "security.isolation",
 		Name:     "Worker isolation",
 		Status:   "warning",
-		Message:  "Built-in workers run as the current user without a complete OS filesystem sandbox.",
+		Message:  "Built-in workers run without a supported OS filesystem sandbox on this platform.",
 		Recovery: "Run only Spare-signed jobs on a trusted account while platform sandbox enforcement is being completed.",
 	}
 }

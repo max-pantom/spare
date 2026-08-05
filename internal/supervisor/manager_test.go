@@ -7,12 +7,14 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/spare-run/spare/internal/health"
 	"github.com/spare-run/spare/internal/model"
+	"github.com/spare-run/spare/internal/network"
 	"github.com/spare-run/spare/internal/recipes"
 	spareRuntime "github.com/spare-run/spare/internal/runtime"
 	"github.com/spare-run/spare/internal/runtime/native"
@@ -77,6 +79,85 @@ func TestRestartBackoffAndWindow(t *testing.T) {
 	}, now, 5*time.Minute)
 	if len(recent) != 1 {
 		t.Fatalf("expected one recent crash, got %d", len(recent))
+	}
+}
+
+func TestFifthWorkerCrashStopsAutomaticRestart(t *testing.T) {
+	store, err := state.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	registry, err := recipes.Builtins()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := New(store, t.TempDir(), model.Machine{ID: "spare_test", Hostname: "test"}, registry, map[string]spareRuntime.Runtime{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Shutdown()
+	now := time.Now()
+	process := &exitedProcess{err: errors.New("forced worker crash")}
+	current := &worker{
+		instance: model.Instance{
+			ID: model.RecipeDrop, RecipeID: model.RecipeDrop, Mode: model.ModeTemporary,
+			DesiredState: model.DesiredRunning, Status: model.StatusHealthy,
+		},
+		process:    process,
+		generation: 1,
+		crashes:    []time.Time{now.Add(-4 * time.Minute), now.Add(-3 * time.Minute), now.Add(-2 * time.Minute), now.Add(-time.Minute)},
+		leaseUntil: now.Add(time.Hour),
+	}
+	manager.mu.Lock()
+	manager.workers[model.RecipeDrop] = current
+	manager.mu.Unlock()
+	manager.wait(model.RecipeDrop, 1, process)
+
+	if current.instance.Status != model.StatusFailed || current.instance.Problem == nil ||
+		current.instance.Problem.Code != "restart_limit_reached" {
+		t.Fatalf("fifth crash state = %#v", current.instance)
+	}
+	if current.restartTimer != nil {
+		t.Fatal("fifth crash scheduled another automatic restart")
+	}
+}
+
+func TestRunningInstanceEndpointsRefreshAfterLANChange(t *testing.T) {
+	store, err := state.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	registry, err := recipes.Builtins()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := New(store, t.TempDir(), model.Machine{ID: "spare_test", Hostname: "Max's Mac"}, registry, map[string]spareRuntime.Runtime{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Shutdown()
+	address := "192.168.1.20"
+	manager.endpoints = func(hostname string, port int) []network.Endpoint {
+		return network.EndpointsForAddresses(hostname, port, []string{address})
+	}
+	manager.workers[model.RecipeDrop] = &worker{instance: model.Instance{
+		ID: model.RecipeDrop, RecipeID: model.RecipeDrop, Port: 7340,
+		DesiredState: model.DesiredRunning, Status: model.StatusHealthy,
+	}}
+	before, err := manager.Get(model.RecipeDrop)
+	if err != nil {
+		t.Fatal(err)
+	}
+	address = "10.0.0.8"
+	after, err := manager.Get(model.RecipeDrop)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(before.URLs, "\n") == strings.Join(after.URLs, "\n") ||
+		!strings.Contains(strings.Join(after.URLs, "\n"), "10.0.0.8:7340") {
+		t.Fatalf("LAN URLs did not refresh: before=%v after=%v", before.URLs, after.URLs)
 	}
 }
 
@@ -745,6 +826,14 @@ type switchProcess struct {
 	done chan struct{}
 	once sync.Once
 }
+
+type exitedProcess struct {
+	err error
+}
+
+func (p *exitedProcess) Wait() error                 { return p.err }
+func (p *exitedProcess) Stop() error                 { return nil }
+func (p *exitedProcess) Status() spareRuntime.Status { return spareRuntime.Status{} }
 
 func (p *switchProcess) Wait() error {
 	<-p.done

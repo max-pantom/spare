@@ -19,11 +19,17 @@ func TestSignVerifyAndRejectTampering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := t.TempDir()
+	source := filepath.Join(t.TempDir(), "Job source 東京")
+	if err := os.MkdirAll(source, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(source, "spare.yml"), []byte("hello"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	packagePath := filepath.Join(t.TempDir(), "job.sp")
+	packagePath := filepath.Join(t.TempDir(), "Signed jobs 東京", "Résumé job.sp")
+	if err := os.MkdirAll(filepath.Dir(packagePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if err := artifacts.PackDirectory(source, packagePath); err != nil {
 		t.Fatal(err)
 	}

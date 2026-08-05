@@ -100,15 +100,18 @@ that remain deliberately outside the trusted built-in V1 boundary.
   state-permission, executable-integrity, and worker-isolation reporting.
 - [x] Pin CI actions and add race detection, Go vulnerability analysis,
   CodeQL, dependency review, and release provenance attestations.
-- [ ] Enforce and verify owner-only Windows ACLs for credentials, endpoint
+- [x] Enforce and verify owner-only Windows ACLs for credentials, endpoint
   state, logs, packages, and job data instead of relying only on inherited
   `%LOCALAPPDATA%` permissions.
-- [ ] Put built-in workers behind platform filesystem and process isolation
-  while preserving explicitly selected folders and required local-network
-  access.
+- [x] Put built-in workers behind deny-by-default macOS filesystem/network
+  sandbox profiles, Linux Landlock filesystem rules, isolated process groups,
+  a clean environment, and Windows restricted Job Objects while preserving
+  manifest-declared folders and network access.
+- [ ] Add Windows AppContainer filesystem/network capabilities so Windows has
+  the same per-worker resource boundary as macOS and Linux.
 - [x] Preserve a corrupt or partially written SQLite database, create fresh
   state, and record the recovery in Activity.
-- [ ] Add integration coverage for LAN changes while a recipe is running.
+- [x] Add integration coverage for LAN changes while a recipe is running.
 - [x] Record Drop transfers as structured daemon activity without weakening the
   worker boundary.
 - [x] Add clearer guidance when the operating-system firewall may block LAN
@@ -123,6 +126,23 @@ that remain deliberately outside the trusted built-in V1 boundary.
   secret/storage provider.
 - [ ] Add malware-scanning hooks before positioning Drop for untrusted
   networks.
+
+## Automated failure coverage completed
+
+These portable checks run in CI; the native per-operating-system acceptance
+passes above remain required before the stable tag.
+
+- [x] Verify the five-crashes-in-five-minutes cutoff does not schedule another
+  automatic restart.
+- [x] Verify missing selected folders produce failed health and doctor states
+  with recovery instructions.
+- [x] Verify a running job refreshes its URLs after a LAN address change.
+- [x] Verify fixed-port collisions fail and automatic selection skips an
+  occupied port.
+- [x] Verify non-ASCII hostnames, upload filenames, signed package paths, and
+  backup/export paths.
+- [x] Verify a failed backup export preserves the previous good archive and
+  removes its partial temporary archive.
 
 ## Third-party recipes
 
