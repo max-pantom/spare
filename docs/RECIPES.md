@@ -1,8 +1,9 @@
 # Build recipe packages
 
-Spare `0.1.0` defines a small V1 manifest and ZIP-compatible `.sp` package
-format. The tooling can validate, inspect, and pack recipes. The runtime
-executes only Site, Drop, and Hook implementations compiled into this release.
+Spare `0.1.1-alpha.3` defines a small V1 manifest and ZIP-compatible `.sp`
+package format. The tooling can validate, inspect, pack, and sign first-party
+job packages. The runtime executes only trusted implementations compiled into
+this release.
 
 ## Editable and distributable forms
 
@@ -92,10 +93,28 @@ special files so the same source can produce reproducible package content.
 Build all bundled packages:
 
 ```bash
-make recipes VERSION=0.1.0
+make recipes VERSION=0.1.1-alpha.3
 ```
 
 Outputs are written to `dist/recipes`.
+
+## Sign and publish an optional job
+
+Optional first-party packages carry an Ed25519 signature envelope. Keep the
+private key outside the repository:
+
+```bash
+spare recipe sign clipboard.sp \
+  --key /secure/path/catalog-ed25519.pem \
+  --minimum-spare-version 0.1.1-alpha.3
+
+SPARE_CATALOG_SIGNING_KEY=/secure/path/catalog-ed25519.pem \
+  make catalog VERSION=0.1.1-alpha.3
+```
+
+The catalog generator writes immutable package downloads and `catalog.json`
+under `website/`. It marks a job available only after the matching trusted
+implementation is part of Spare.
 
 ## V1 manifest
 
@@ -163,7 +182,7 @@ manifest authors cannot select an arbitrary host command.
 
 ## Package execution boundary
 
-These work because their IDs resolve to trusted built-in implementations:
+These work because their IDs resolve to trusted implementations:
 
 ```bash
 spare try site.sp --path ./public
@@ -171,6 +190,19 @@ spare install drop.sp --path ./received-files
 spare try hook.sp
 ```
 
-A valid package with another recipe ID can be validated and inspected, but
-Spare refuses to run it. Third-party artifact execution needs signatures,
-publisher trust, stronger permission enforcement, and isolation first.
+Site, Drop, and Hook are bundled. Clipboard, Downloads, and Monitor must first
+be installed from a verified optional package:
+
+```bash
+spare job add ~/Downloads/clipboard_0.1.0.sp
+spare install clipboard
+```
+
+Spare verifies the whole package checksum, Ed25519 signature, publisher key,
+minimum compatible Spare version, exact manifest match, and downgrade rules.
+It repeats verification from the private library before making an installed
+job available. A valid package with an unknown ID can still be safely
+inspected, but Spare refuses to install or execute it.
+
+Optional packages never carry executable plugins. They enable the matching
+first-party implementation already compiled into Spare.

@@ -253,7 +253,7 @@ func (v *Viewer) previewFile(response http.ResponseWriter, request *http.Request
 		writeViewerError(response, http.StatusRequestEntityTooLarge, "Files larger than 2 MB are not previewed.")
 		return
 	}
-	data, err := artifacts.ReadFile(v.path, file.Name)
+	data, err := artifacts.ReadFileLimit(v.path, file.Name, int64(maxPreviewSize))
 	if err != nil {
 		writeViewerError(response, http.StatusInternalServerError, "Unable to read this package file.")
 		return

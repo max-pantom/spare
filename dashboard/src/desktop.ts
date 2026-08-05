@@ -2,13 +2,17 @@ import type {
   CreateInstanceInput,
   DesktopPreferences,
   DesktopSnapshot,
-  Instance
+  Instance,
+  JobPackage,
+  JobPackageReview,
+  JobProfile
 } from "./types";
 
 export type DesktopBridge = {
   Bootstrap(): Promise<DesktopSnapshot>;
   Snapshot(): Promise<DesktopSnapshot>;
   CreateInstance(input: CreateInstanceInput): Promise<Instance>;
+  SwitchInstance(input: CreateInstanceInput): Promise<Instance>;
   ConfigureInstance(id: string, input: CreateInstanceInput): Promise<Instance>;
   StartInstance(id: string): Promise<Instance>;
   StopInstance(id: string): Promise<Instance>;
@@ -28,6 +32,11 @@ export type DesktopBridge = {
   >;
   PendingLaunchPaths(): Promise<string[]>;
   OpenRecipePackage(path: string): Promise<void>;
+  ReviewJobPackage(path: string): Promise<JobPackageReview>;
+  InstallJobPackage(path: string): Promise<JobPackage>;
+  UninstallJobPackage(id: string): Promise<void>;
+  JobProfile(id: string): Promise<JobProfile>;
+  OpenJobCatalog(): Promise<void>;
   AddDropFiles(instanceId: string, paths: string[]): Promise<string[]>;
   ExportBackup(instanceId: string): Promise<string>;
   RestoreBackup(source: string): Promise<Instance>;

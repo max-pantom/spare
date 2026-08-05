@@ -1,0 +1,51 @@
+schema: spare.recipe/v1
+id: clipboard
+name: Clipboard
+version: 0.1.0
+description: Move text, links, and small files between trusted devices.
+support:
+  systems: [darwin, windows, linux]
+  architectures: [amd64, arm64]
+runtime:
+  type: native
+resources:
+  memoryRecommendedBytes: 67108864
+  memoryMaximumBytes: 268435456
+  cpuMaximum: 1
+  storageMinimumBytes: 26214400
+network:
+  visibility: local
+  port: automatic
+storage:
+  readOnly: false
+health:
+  type: http
+  path: /
+  intervalSeconds: 10
+  failureThreshold: 3
+config:
+  pairing-code:
+    type: string
+    label: Pairing code
+    description: Leave blank to generate a six-digit code for trusted devices.
+  max-file-size:
+    type: size
+    label: Maximum file size
+    description: Clipboard rejects individual files larger than this limit.
+    default: 25MB
+    minimum: 1024
+    maximum: 250000000
+  default-expiry:
+    type: integer
+    label: Default expiry in minutes
+    description: New entries are removed after this amount of time.
+    default: 60
+    minimum: 5
+    maximum: 1440
+permissions:
+  filesystem: {}
+  network:
+    local: true
+    internet: false
+  startOnLogin: true
+  runInBackground: true

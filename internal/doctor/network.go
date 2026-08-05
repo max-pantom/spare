@@ -43,6 +43,13 @@ func networkChecks(instance model.Instance) []Check {
 			Status:  "ready",
 			Message: "Spare found an address for nearby devices.",
 		})
+		result = append(result, Check{
+			ID:       "firewall." + instance.ID,
+			Name:     "Incoming access",
+			Status:   "warning",
+			Message:  "A LAN address exists, but incoming access cannot be verified from this computer alone.",
+			Recovery: "If a nearby device cannot connect, allow Spare and spared through the operating-system firewall, disconnect restrictive VPNs, and check Wi-Fi client isolation.",
+		})
 	} else {
 		result = append(result, Check{
 			ID:       "lan." + instance.ID,

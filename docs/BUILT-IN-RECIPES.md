@@ -1,6 +1,6 @@
 # Use the built-in recipes
 
-Spare `0.1.0` includes three trusted recipes:
+Spare `0.1.1-alpha.3` includes three bundled trusted recipes:
 
 - **Site** publishes a folder as a read-only website.
 - **Drop** receives files from browsers on your local network.

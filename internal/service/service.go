@@ -39,6 +39,8 @@ func BuildDefinition(goos, executable, stateRoot, home string) (Definition, erro
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>Umask</key>
+  <integer>63</integer>
   <key>StandardOutPath</key>
   <string>%s</string>
   <key>StandardErrorPath</key>
@@ -63,6 +65,20 @@ ExecStart=%s
 Restart=on-failure
 RestartSec=2
 Environment=SPARE_HOME=%s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+CapabilityBoundingSet=
+AmbientCapabilities=
 
 [Install]
 WantedBy=default.target
@@ -79,6 +95,16 @@ WantedBy=default.target
 }
 
 func InstallAndStart(ctx context.Context, executable, stateRoot string) error {
+	if !filepath.IsAbs(executable) || !filepath.IsAbs(stateRoot) {
+		return errors.New("Spare service paths must be absolute")
+	}
+	info, err := os.Lstat(executable)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("the Spare daemon must be a regular file")
+	}
 	if os.Getenv("SPARE_NO_SERVICE") == "1" {
 		return startDetached(executable, stateRoot)
 	}
@@ -120,7 +146,7 @@ func InstallAndStart(ctx context.Context, executable, stateRoot string) error {
 		}
 	case "windows":
 		taskCommand := fmt.Sprintf(`"%s"`, executable)
-		args := []string{"/Create", "/SC", "ONLOGON", "/TN", definition.Name, "/TR", taskCommand, "/F"}
+		args := []string{"/Create", "/SC", "ONLOGON", "/TN", definition.Name, "/TR", taskCommand, "/RL", "LIMITED", "/F"}
 		if output, err := exec.CommandContext(ctx, "schtasks", args...).CombinedOutput(); err != nil {
 			return fmt.Errorf("register Spare login task: %s: %w", strings.TrimSpace(string(output)), err)
 		}
@@ -174,7 +200,28 @@ func writeDefinition(definition Definition) error {
 	if err := os.MkdirAll(filepath.Dir(definition.Path), 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(definition.Path, []byte(definition.Content), 0o600)
+	temporary, err := os.CreateTemp(filepath.Dir(definition.Path), ".spare-service-*")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err := temporary.Chmod(0o600); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if _, err := temporary.WriteString(definition.Content); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Sync(); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporaryPath, definition.Path)
 }
 
 func startDetached(executable, stateRoot string) error {

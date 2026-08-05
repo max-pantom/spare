@@ -16,11 +16,12 @@ import type {
   DesktopTheme,
   Event,
   Instance,
+  JobPackageReview,
   Recipe
 } from "./types";
 import { SpareNavIcon, type SpareNavIconName } from "./SpareNavIcon";
 
-type View = "home" | "recipes" | "activity" | "machine" | "settings";
+type View = "home" | "recipes" | "activity" | "machine" | "settings" | "job";
 
 const navigation: Array<{
   id: View;
@@ -73,6 +74,10 @@ export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
   const [view, setView] = useState<View>("home");
   const [detailRecipe, setDetailRecipe] = useState<Recipe>();
   const [setupRecipe, setSetupRecipe] = useState<Recipe>();
+  const [packageReview, setPackageReview] = useState<{
+    source: string;
+    review: JobPackageReview;
+  }>();
   const [editingInstance, setEditingInstance] = useState<Instance>();
   const [setupInitialValues, setSetupInitialValues] = useState<
     Record<string, unknown>
@@ -86,6 +91,7 @@ export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
   const [themePreview, setThemePreview] = useState<DesktopTheme>();
   const [transformationStage, setTransformationStage] =
     useState<TransformationStage>("");
+  const [jobFrameKey, setJobFrameKey] = useState(0);
 
   const refresh = useCallback(async () => {
     try {
@@ -105,8 +111,12 @@ export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
         const current = await bridge.Snapshot();
         const currentInstance = current.instances[0];
         if (dropped.length === 1 && dropped[0].kind === "recipe-package") {
-          await bridge.OpenRecipePackage(dropped[0].path);
-          setAnnouncement(`${dropped[0].name} opened in the safe recipe viewer.`);
+          const review = await bridge.ReviewJobPackage(dropped[0].path);
+          setPackageReview({ source: dropped[0].path, review });
+          setDetailRecipe(undefined);
+          setSetupRecipe(undefined);
+          setView("recipes");
+          setAnnouncement(`${review.title} is ready for review.`);
           return;
         }
         if (dropped.length === 1 && dropped[0].kind === "backup") {
@@ -231,6 +241,13 @@ export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
   const activeRecipe = snapshot?.recipes.find(
     (recipe) => recipe.id === instance?.recipeId
   );
+
+  useEffect(() => {
+    if (view === "job" && !instance) {
+      setView("home");
+    }
+  }, [instance, view]);
+
   const windowTitle = transformationStage === "starting" && setupRecipe
     ? `Starting ${setupRecipe.title}`
     : transformationStage === "complete" && setupRecipe
@@ -255,28 +272,58 @@ export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
     document.title = `${windowTitle} · Spare`;
   }, [windowTitle]);
 
-  async function lifecycle(action: "start" | "stop") {
+  async function lifecycle(action: "resume" | "pause") {
     if (!instance) return;
     const title = activeRecipe?.title ?? instance.recipeId;
     setWorking(true);
     setError("");
     try {
       const updated =
-        action === "start"
+        action === "resume"
           ? await bridge.StartInstance(instance.id)
           : await bridge.StopInstance(instance.id);
       setSnapshot((current) =>
         current ? { ...current, instances: [updated] } : current
       );
-      setAnnouncement(
-        `${title} ${action === "start" ? "started" : "stopped"}.`
-      );
+      setAnnouncement(`${title} ${action === "resume" ? "resumed" : "paused"}.`);
       await refresh();
     } catch (requestError) {
       setError(
         errorMessage(
           requestError,
           `Unable to ${action} ${title}. Run repair and try again.`
+        )
+      );
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function stopActiveJob() {
+    if (!instance) return;
+    const title = activeRecipe?.title ?? instance.recipeId;
+    setWorking(true);
+    setError("");
+    try {
+      await bridge.RemoveInstance(instance.id);
+      setSnapshot((current) =>
+        current ? { ...current, instances: [] } : current
+      );
+      setView("home");
+      setDetailRecipe(undefined);
+      setSetupRecipe(undefined);
+      setEditingInstance(undefined);
+      setSetupInitialValues({});
+      setShowShare(false);
+      setAnnouncement(
+        `${title} stopped. Its configuration was saved and its files were left unchanged.`
+      );
+      await refresh();
+    } catch (requestError) {
+      setError(
+        errorMessage(
+          requestError,
+          `Unable to stop ${title}. Run repair and try again.`
         )
       );
     } finally {
@@ -410,12 +457,48 @@ export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
 
         {loading && !snapshot ? (
           <LoadingView />
+        ) : packageReview && snapshot ? (
+          <JobPackageReviewView
+            packageReview={packageReview}
+            working={working}
+            onCancel={() => setPackageReview(undefined)}
+            onInspect={() =>
+              void bridge.OpenRecipePackage(packageReview.source)
+            }
+            onInstall={async () => {
+              setWorking(true);
+              try {
+                await bridge.InstallJobPackage(packageReview.source);
+                setAnnouncement(
+                  `${packageReview.review.title} was installed and is ready to set up.`
+                );
+                setPackageReview(undefined);
+                await refresh();
+              } catch (requestError) {
+                setError(
+                  errorMessage(
+                    requestError,
+                    `Unable to install ${packageReview.review.title}.`
+                  )
+                );
+              } finally {
+                setWorking(false);
+              }
+            }}
+          />
         ) : setupRecipe && snapshot ? (
           <SetupView
             bridge={bridge}
             recipe={setupRecipe}
             initialValues={setupInitialValues}
             existingInstance={editingInstance}
+            replacingInstance={
+              !editingInstance && instance
+                ? snapshot.recipes.find(
+                    (candidate) => candidate.id === instance.recipeId
+                  )
+                : undefined
+            }
             onTransformationStageChange={setTransformationStage}
             backLabel={detailRecipe ? `Back to ${detailRecipe.title}` : "Back to jobs"}
             onBack={() => {
@@ -451,14 +534,21 @@ export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
                 working={working}
                 showShare={showShare}
                 onShowShare={() => setShowShare((current) => !current)}
+                onOpen={() => navigate("job")}
                 onChoose={(recipe) => {
-                  setSetupInitialValues({});
-                  setEditingInstance(undefined);
-                  setDetailRecipe(recipe);
-                  setView("recipes");
+                  void bridge
+                    .JobProfile(recipe.id)
+                    .then((profile) => setSetupInitialValues(profile.config))
+                    .catch(() => setSetupInitialValues({}))
+                    .finally(() => {
+                      setEditingInstance(undefined);
+                      setDetailRecipe(recipe);
+                      setView("recipes");
+                    });
                 }}
-                onStart={() => void lifecycle("start")}
-                onStop={() => void lifecycle("stop")}
+                onStart={() => void lifecycle("resume")}
+                onPause={() => void lifecycle("pause")}
+                onStop={() => void stopActiveJob()}
                 onAddFiles={() => void addFilesToDrop()}
                 onActivity={() => navigate("activity")}
                 onRepair={() => void repair()}
@@ -481,8 +571,14 @@ export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
                   snapshot={snapshot}
                   onBack={() => setDetailRecipe(undefined)}
                   onSetup={() => {
-                    setSetupInitialValues({});
-                    setEditingInstance(undefined);
+                    const current =
+                      instance?.recipeId === detailRecipe.id
+                        ? instance
+                        : undefined;
+                    setSetupInitialValues(
+                      current?.config ?? setupInitialValues
+                    );
+                    setEditingInstance(current);
                     setSetupRecipe(detailRecipe);
                   }}
                 />
@@ -490,10 +586,23 @@ export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
                 <RecipesView
                   bridge={bridge}
                   snapshot={snapshot}
+                  onChanged={refresh}
+                  onReviewPackage={(source, review) =>
+                    setPackageReview({ source, review })
+                  }
                   onChoose={(recipe) => {
-                    setSetupInitialValues({});
-                    setEditingInstance(undefined);
-                    setDetailRecipe(recipe);
+                    if (recipe.id === instance?.recipeId) {
+                      navigate("job");
+                      return;
+                    }
+                    void bridge
+                      .JobProfile(recipe.id)
+                      .then((profile) => setSetupInitialValues(profile.config))
+                      .catch(() => setSetupInitialValues({}))
+                      .finally(() => {
+                        setEditingInstance(undefined);
+                        setDetailRecipe(recipe);
+                      });
                   }}
                 />
               )
@@ -505,7 +614,7 @@ export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
                 working={working}
                 onRepair={() => void repair()}
                 onDetails={() => navigate("machine")}
-                onStop={() => void lifecycle("stop")}
+                onStop={() => void stopActiveJob()}
                 onConfigure={() => {
                   if (instance && activeRecipe) {
                     setDetailRecipe(undefined);
@@ -514,6 +623,28 @@ export function DesktopApp({ bridge }: { bridge: DesktopBridge }) {
                     setSetupRecipe(activeRecipe);
                   }
                 }}
+              />
+            )}
+            {view === "job" && instance && (
+              <JobWorkspaceView
+                key={`${instance.id}-${jobFrameKey}`}
+                bridge={bridge}
+                instance={instance}
+                recipe={activeRecipe}
+                working={working}
+                onBack={() => navigate("home")}
+                onRefresh={() => setJobFrameKey((current) => current + 1)}
+                onConfigure={() => {
+                  if (activeRecipe) {
+                    setDetailRecipe(undefined);
+                    setSetupInitialValues(instance.config);
+                    setEditingInstance(instance);
+                    setSetupRecipe(activeRecipe);
+                  }
+                }}
+                onResume={() => void lifecycle("resume")}
+                onPause={() => void lifecycle("pause")}
+                onStop={() => void stopActiveJob()}
               />
             )}
             {view === "machine" && <MachineView snapshot={snapshot} />}
@@ -630,8 +761,10 @@ function HomeView({
   working,
   showShare,
   onShowShare,
+  onOpen,
   onChoose,
   onStart,
+  onPause,
   onStop,
   onAddFiles,
   onActivity,
@@ -647,8 +780,10 @@ function HomeView({
   working: boolean;
   showShare: boolean;
   onShowShare: () => void;
+  onOpen: () => void;
   onChoose: (recipe: Recipe) => void;
   onStart: () => void;
+  onPause: () => void;
   onStop: () => void;
   onAddFiles: () => void;
   onActivity: () => void;
@@ -764,7 +899,7 @@ function HomeView({
         <button
           className="button button-secondary"
           type="button"
-          onClick={() => primaryURL && void bridge.OpenURL(primaryURL)}
+          onClick={onOpen}
           disabled={!primaryURL}
         >
           Open {title}
@@ -793,20 +928,30 @@ function HomeView({
           <button
             className="button button-secondary"
             type="button"
-            onClick={onStop}
+            onClick={onPause}
             disabled={working}
           >
             Pause
           </button>
         ) : (
-          <button
-            className="button button-primary"
-            type="button"
-            onClick={onStart}
-            disabled={working}
-          >
-            Resume
-          </button>
+          <>
+            <button
+              className="button button-primary"
+              type="button"
+              onClick={onStart}
+              disabled={working}
+            >
+              Resume
+            </button>
+            <button
+              className="button button-danger"
+              type="button"
+              onClick={onStop}
+              disabled={working}
+            >
+              Stop job
+            </button>
+          </>
         )}
         {instance.recipeId === "drop" && (
           <button
@@ -847,6 +992,51 @@ function HomeView({
         ))}
       </dl>
 
+      {(snapshot.devices?.length > 0 ||
+        typeof instance.config["pairing-code"] === "string") && (
+        <section
+          className="desktop-devices"
+          aria-labelledby="desktop-devices-heading"
+        >
+          <header className="desktop-devices-heading">
+            <h2 id="desktop-devices-heading">Connected devices</h2>
+            <span>{snapshot.devices?.length ?? 0}</span>
+          </header>
+          {snapshot.devices?.length ? (
+            <ul className="desktop-device-list">
+              {snapshot.devices.map((device) => (
+                <li key={`${device.name}-${device.pairedAt}`}>
+                  <span
+                    className="status-dot status-dot-healthy"
+                    aria-hidden="true"
+                  />
+                  <span className="desktop-device-copy">
+                    <strong>{device.name || "Nearby device"}</strong>
+                    <span>
+                      Connected{" "}
+                      <time dateTime={device.pairedAt}>
+                        {formatTime(device.pairedAt)}
+                      </time>
+                    </span>
+                  </span>
+                  <time
+                    className="desktop-device-last-seen"
+                    dateTime={device.lastSeen}
+                    title={formatTime(device.lastSeen)}
+                  >
+                    Last connected {formatRelativeTime(device.lastSeen)}
+                  </time>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="desktop-devices-empty">
+              No devices have connected to this job yet.
+            </p>
+          )}
+        </section>
+      )}
+
       {showShare && (
         <SharePanel
           instance={instance}
@@ -858,6 +1048,139 @@ function HomeView({
       )}
 
       {instance.recipeId === "drop" && <RecipeSignal />}
+    </section>
+  );
+}
+
+function JobWorkspaceView({
+  bridge,
+  instance,
+  recipe,
+  working,
+  onBack,
+  onRefresh,
+  onConfigure,
+  onResume,
+  onPause,
+  onStop
+}: {
+  bridge: DesktopBridge;
+  instance: Instance;
+  recipe?: Recipe;
+  working: boolean;
+  onBack: () => void;
+  onRefresh: () => void;
+  onConfigure: () => void;
+  onResume: () => void;
+  onPause: () => void;
+  onStop: () => void;
+}) {
+  const title = recipe?.title ?? instance.recipeId;
+  const workspaceURL = localJobURL(instance);
+  const running = ["starting", "healthy", "degraded"].includes(instance.status);
+
+  return (
+    <section
+      className="desktop-page desktop-job-workspace"
+      aria-labelledby="desktop-job-workspace-heading"
+    >
+      <header className="desktop-job-workspace-header">
+        <div className="desktop-job-workspace-title">
+          <button
+            className="back-button"
+            type="button"
+            onClick={onBack}
+          >
+            ← Home
+          </button>
+          <div>
+            <p className="eyebrow">In Spare</p>
+            <h1 id="desktop-job-workspace-heading">{title}</h1>
+          </div>
+        </div>
+        <div
+          className="desktop-job-workspace-actions"
+          role="group"
+          aria-label={`${title} workspace controls`}
+        >
+          {running ? (
+            <>
+              <button
+                className="button button-secondary"
+                type="button"
+                onClick={onRefresh}
+              >
+                Refresh
+              </button>
+              <button
+                className="button button-secondary"
+                type="button"
+                onClick={() => void bridge.OpenURL(workspaceURL)}
+                disabled={!workspaceURL}
+              >
+                Open in browser
+              </button>
+              <button
+                className="button button-secondary"
+                type="button"
+                onClick={onConfigure}
+              >
+                Configure
+              </button>
+              <button
+                className="button button-secondary"
+                type="button"
+                onClick={onPause}
+                disabled={working}
+              >
+                Pause
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                className="button button-primary"
+                type="button"
+                onClick={onResume}
+                disabled={working}
+              >
+                Resume
+              </button>
+              <button
+                className="button button-danger"
+                type="button"
+                onClick={onStop}
+                disabled={working}
+              >
+                Stop job
+              </button>
+            </>
+          )}
+        </div>
+      </header>
+      {running && workspaceURL ? (
+        <iframe
+          className="desktop-job-frame"
+          src={workspaceURL}
+          title={`${title} workspace`}
+          referrerPolicy="no-referrer"
+          sandbox="allow-downloads allow-forms allow-modals allow-popups allow-same-origin allow-scripts"
+          allow="autoplay; clipboard-read; clipboard-write"
+          allowFullScreen
+        />
+      ) : (
+        <div className="desktop-job-workspace-empty" role="status">
+          <StatusIcon status={instance.status} />
+          <div>
+            <h2>{title} is {statusLabels[instance.status].toLowerCase()}</h2>
+            <p>
+              {instance.status === "stopped"
+                ? "Resume this job to use it inside Spare, or stop it to choose a different job."
+                : "Run repair or review Activity before trying again."}
+            </p>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -968,11 +1291,125 @@ function SharePanel({
   );
 }
 
+function JobPackageReviewView({
+  packageReview,
+  working,
+  onCancel,
+  onInspect,
+  onInstall
+}: {
+  packageReview: { source: string; review: JobPackageReview };
+  working: boolean;
+  onCancel: () => void;
+  onInspect: () => void;
+  onInstall: () => void | Promise<void>;
+}) {
+  const { review } = packageReview;
+  return (
+    <article className="desktop-page package-review-page">
+      <button className="back-button" type="button" onClick={onCancel}>
+        <span aria-hidden="true">←</span> Back to jobs
+      </button>
+      <header className="package-review-header">
+        <p className="eyebrow">Verified job package</p>
+        <h1>Install {review.title}?</h1>
+        <p className="lede">{review.description}</p>
+      </header>
+
+      <dl className="package-review-meta">
+        <div>
+          <dt>Publisher</dt>
+          <dd>{review.publisher}</dd>
+        </div>
+        <div>
+          <dt>Job version</dt>
+          <dd>{review.version}</dd>
+        </div>
+        <div>
+          <dt>Required Spare version</dt>
+          <dd>{review.minimumSpareVersion} or newer</dd>
+        </div>
+        <div>
+          <dt>Signature</dt>
+          <dd className="package-verified">
+            <span aria-hidden="true">✓</span> Verified
+          </dd>
+        </div>
+      </dl>
+
+      <section
+        className="job-detail-section package-permissions"
+        aria-labelledby="package-permissions-heading"
+      >
+        <h2 id="package-permissions-heading">{review.title} needs access to</h2>
+        <ul className="job-detail-list">
+          {review.permissions
+            .filter((permission) => permission.granted)
+            .map((permission) => (
+              <li key={permission.id}>
+                <span className="job-detail-marker" aria-hidden="true">✓</span>
+                <span>{permission.description}</span>
+              </li>
+            ))}
+        </ul>
+      </section>
+
+      <details className="package-checksum">
+        <summary>Package details</summary>
+        <dl>
+          <dt>File</dt>
+          <dd>{packageReview.source.split(/[\\/]/).at(-1)}</dd>
+          <dt>SHA-256</dt>
+          <dd>
+            <code>{review.checksum}</code>
+          </dd>
+        </dl>
+      </details>
+
+      <p className="package-review-note">
+        This signed package contains setup metadata only. The code for{" "}
+        {review.title} is already included in Spare, and no downloaded
+        executable will run. Installing it will not stop or replace the current
+        job.
+      </p>
+      <div className="setup-actions">
+        <button
+          className="button button-primary"
+          type="button"
+          onClick={() => void onInstall()}
+          disabled={working}
+        >
+          {review.alreadyInstalled
+            ? `Reinstall ${review.title}`
+            : `Install ${review.title}`}
+        </button>
+        <button
+          className="button button-secondary"
+          type="button"
+          onClick={onInspect}
+          disabled={working}
+        >
+          Inspect package
+        </button>
+        <button
+          className="button button-secondary"
+          type="button"
+          onClick={onCancel}
+          disabled={working}
+        >
+          Cancel
+        </button>
+      </div>
+    </article>
+  );
+}
+
 function SetupView({
   bridge,
   recipe,
   initialValues,
   existingInstance,
+  replacingInstance,
   onTransformationStageChange,
   backLabel,
   onBack,
@@ -982,6 +1419,7 @@ function SetupView({
   recipe: Recipe;
   initialValues: Record<string, unknown>;
   existingInstance?: Instance;
+  replacingInstance?: Recipe;
   onTransformationStageChange: (stage: TransformationStage) => void;
   backLabel: string;
   onBack: () => void;
@@ -1056,7 +1494,9 @@ function SetupView({
       setTransformation({ step: 0, complete: false });
       onTransformationStageChange("starting");
       const [created] = await Promise.all([
-        bridge.CreateInstance(input),
+        replacingInstance
+          ? bridge.SwitchInstance(input)
+          : bridge.CreateInstance(input),
         playTransformationSequence(
           (step) => setTransformation({ step, complete: false }),
           transformationController.signal
@@ -1116,7 +1556,11 @@ function SetupView({
         <span aria-hidden="true">←</span> {backLabel}
       </button>
       <div className="desktop-page-heading">
-        <p className="eyebrow">Built in and trusted</p>
+        <p className="eyebrow">
+          {recipe.installation === "installed"
+            ? "Verified optional job"
+            : "Built in and trusted"}
+        </p>
         <h1>{existingInstance ? `Configure ${recipe.title}` : `Set up ${recipe.title}`}</h1>
         <p className="lede">{recipe.description}</p>
       </div>
@@ -1229,7 +1673,11 @@ function SetupView({
             type="submit"
             disabled={working}
           >
-            {existingInstance ? "Save configuration" : `Start ${recipe.title}`}
+            {existingInstance
+              ? "Save configuration"
+              : replacingInstance
+                ? `Stop ${replacingInstance.title} and start ${recipe.title}`
+                : `Start ${recipe.title}`}
           </button>
           <button
             className="button button-secondary"
@@ -1392,7 +1840,10 @@ function JobDetailView({
   const networkAvailable =
     machine.capabilities.canServeLAN || machine.lanAddresses.length > 0;
   const hasCurrentJob = snapshot.instances.length > 0;
-  const canSetUp = recipe.compatibility.supported && !hasCurrentJob;
+  const currentRecipe = snapshot.recipes.find(
+    (candidate) => candidate.id === snapshot.instances[0]?.recipeId
+  );
+  const canSetUp = recipe.compatibility.supported;
 
   return (
     <article className="desktop-page job-detail-page">
@@ -1477,13 +1928,18 @@ function JobDetailView({
           onClick={onSetup}
           disabled={!canSetUp}
         >
-          Set up {recipe.title}
+          {hasCurrentJob && currentRecipe?.id !== recipe.id
+            ? `Switch to ${recipe.title}`
+            : `Set up ${recipe.title}`}
         </button>
         {!recipe.compatibility.supported && (
           <p>This computer does not currently support {recipe.title}.</p>
         )}
-        {hasCurrentJob && (
-          <p>Change the current job before setting up another one.</p>
+        {hasCurrentJob && currentRecipe?.id !== recipe.id && (
+          <p>
+            Starting {recipe.title} will stop {currentRecipe?.title ?? "the current job"}.
+            Its configuration will be saved.
+          </p>
         )}
       </div>
     </article>
@@ -1493,28 +1949,67 @@ function JobDetailView({
 function RecipesView({
   bridge,
   snapshot,
+  onChanged,
+  onReviewPackage,
   onChoose
 }: {
   bridge: DesktopBridge;
   snapshot: DesktopSnapshot;
+  onChanged: () => void | Promise<void>;
+  onReviewPackage: (source: string, review: JobPackageReview) => void;
   onChoose: (recipe: Recipe) => void;
 }) {
   const [error, setError] = useState("");
+  const [workingJob, setWorkingJob] = useState("");
   const installedJobs = [...snapshot.recipes].sort(
     (first, second) => installedJobRank(first.id) - installedJobRank(second.id)
   );
+  const activeInstance = snapshot.instances[0];
+  const activeJobID = activeInstance?.recipeId;
 
   async function installMoreJobs() {
     try {
-      await bridge.OpenRecipePackage("");
+      await bridge.OpenJobCatalog();
       setError("");
     } catch (requestError) {
       setError(
         errorMessage(
           requestError,
-          "Unable to open a job package. No installed jobs were changed."
+          "Unable to open the Spare job catalog."
         )
       );
+    }
+  }
+
+  async function reviewDownloadedPackage() {
+    try {
+      const source = await bridge.ChooseFile("recipe");
+      if (!source) return;
+      const review = await bridge.ReviewJobPackage(source);
+      onReviewPackage(source, review);
+      setError("");
+    } catch (requestError) {
+      setError(
+        errorMessage(
+          requestError,
+          "Unable to verify this job package. No installed jobs were changed."
+        )
+      );
+    }
+  }
+
+  async function uninstallJob(recipe: Recipe) {
+    setWorkingJob(recipe.id);
+    try {
+      await bridge.UninstallJobPackage(recipe.id);
+      await onChanged();
+      setError("");
+    } catch (requestError) {
+      setError(
+        errorMessage(requestError, `Unable to uninstall ${recipe.title}.`)
+      );
+    } finally {
+      setWorkingJob("");
     }
   }
 
@@ -1543,10 +2038,16 @@ function RecipesView({
                 onClick={() => onChoose(recipe)}
                 disabled={!recipe.compatibility.supported}
               >
-                {recipe.id === "hook" ? "Open" : "Start"}
+                {recipe.id === activeJobID
+                  ? "Open"
+                  : activeJobID
+                    ? "Switch"
+                    : recipe.id === "hook"
+                      ? "Open"
+                      : "Start"}
               </button>
             </div>
-            <p>{installedJobDescription(recipe.id)}</p>
+            <p>{installedJobDescription(recipe)}</p>
             <footer>
               <span
                 className={
@@ -1555,42 +2056,79 @@ function RecipesView({
                     : "desktop-job-state is-unavailable"
                 }
               >
-                {recipe.compatibility.supported ? "Active" : "Unavailable"}
+                {recipe.id === activeJobID
+                  ? activeInstance?.status === "stopped"
+                    ? "Paused"
+                    : "Running"
+                  : recipe.compatibility.supported
+                    ? "Ready"
+                    : "Unavailable"}
               </span>
-              <span>Pre-installed</span>
+              <span>
+                {recipe.installation === "installed"
+                  ? `Verified · ${recipe.publisher ?? "Spare"}`
+                  : "Pre-installed"}
+              </span>
             </footer>
+            {recipe.installation === "installed" &&
+              recipe.id !== activeJobID && (
+                <button
+                  className="desktop-job-card-remove"
+                  type="button"
+                  onClick={() => void uninstallJob(recipe)}
+                  disabled={workingJob === recipe.id}
+                >
+                  Uninstall {recipe.title}
+                </button>
+              )}
           </article>
         ))}
       </div>
-      <button
-        className="desktop-jobs-install"
-        type="button"
-        onClick={() => void installMoreJobs()}
-      >
-        Install more jobs
-      </button>
+      <div className="desktop-jobs-install-actions">
+        <button
+          className="desktop-jobs-install"
+          type="button"
+          onClick={() => void installMoreJobs()}
+        >
+          Install more jobs
+        </button>
+        <button
+          className="desktop-jobs-install desktop-jobs-install-secondary"
+          type="button"
+          onClick={() => void reviewDownloadedPackage()}
+        >
+          Install downloaded package
+        </button>
+      </div>
     </section>
   );
 }
 
-const installedJobOrder = ["drop", "hook", "site"];
+const installedJobOrder = [
+  "drop",
+  "hook",
+  "site",
+  "clipboard",
+  "downloads",
+  "monitor"
+];
 
 function installedJobRank(id: string) {
   const rank = installedJobOrder.indexOf(id);
   return rank === -1 ? installedJobOrder.length : rank;
 }
 
-function installedJobDescription(id: string) {
-  if (id === "drop") {
+function installedJobDescription(recipe: Recipe) {
+  if (recipe.id === "drop") {
     return "Receive files directly from nearby phones, tablets, and computers over your local network.";
   }
-  if (id === "hook") {
+  if (recipe.id === "hook") {
     return "Capture, inspect, and replay webhook requests while testing apps, integrations, and automations.";
   }
-  if (id === "site") {
+  if (recipe.id === "site") {
     return "Turn any folder into a local website that nearby devices can open through their browser.";
   }
-  return "Give this computer something useful to do.";
+  return recipe.description;
 }
 
 function ActivityView({
@@ -2396,6 +2934,25 @@ function compactAddress(url?: string) {
   } catch {
     return url;
   }
+}
+
+function localJobURL(instance: Instance) {
+  const local = instance.urls.find((value) => {
+    try {
+      const hostname = new URL(value).hostname.toLowerCase();
+      return (
+        hostname === "localhost" ||
+        hostname === "127.0.0.1" ||
+        hostname === "[::1]" ||
+        hostname === "::1"
+      );
+    } catch {
+      return false;
+    }
+  });
+  if (local) return local;
+  if (instance.port > 0) return `http://127.0.0.1:${instance.port}/`;
+  return instance.urls[0] ?? "";
 }
 
 function formatRelativeTime(value: string) {

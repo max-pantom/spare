@@ -5,14 +5,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
+	"github.com/spare-run/spare/internal/auth"
 	"github.com/spare-run/spare/internal/model"
 	"github.com/spare-run/spare/internal/paths"
 )
@@ -56,14 +55,7 @@ func Discover(paths paths.Paths) (*Client, error) {
 }
 
 func ReadToken(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	if len(data) > 4096 {
-		return "", errors.New("the API token file is invalid")
-	}
-	return string(data), nil
+	return auth.ReadToken(path)
 }
 
 func (c *Client) Health(ctx context.Context) error {
@@ -79,6 +71,38 @@ func (c *Client) Machine(ctx context.Context) (model.Machine, error) {
 func (c *Client) Recipes(ctx context.Context) ([]model.Recipe, error) {
 	var result []model.Recipe
 	err := c.do(ctx, http.MethodGet, "/api/v1/recipes", nil, &result)
+	return result, err
+}
+
+func (c *Client) JobPackages(ctx context.Context) ([]model.JobPackage, error) {
+	var result []model.JobPackage
+	err := c.do(ctx, http.MethodGet, "/api/v1/job-packages", nil, &result)
+	return result, err
+}
+
+func (c *Client) ReviewJobPackage(ctx context.Context, source string) (model.JobPackageReview, error) {
+	var result model.JobPackageReview
+	err := c.do(ctx, http.MethodPost, "/api/v1/job-packages/review", map[string]string{
+		"source": source,
+	}, &result)
+	return result, err
+}
+
+func (c *Client) InstallJobPackage(ctx context.Context, source string) (model.JobPackage, error) {
+	var result model.JobPackage
+	err := c.do(ctx, http.MethodPost, "/api/v1/job-packages/install", map[string]string{
+		"source": source,
+	}, &result)
+	return result, err
+}
+
+func (c *Client) UninstallJobPackage(ctx context.Context, id string) error {
+	return c.do(ctx, http.MethodDelete, "/api/v1/job-packages/"+id, nil, nil)
+}
+
+func (c *Client) JobProfile(ctx context.Context, id string) (model.JobProfile, error) {
+	var result model.JobProfile
+	err := c.do(ctx, http.MethodGet, "/api/v1/job-profiles/"+id, nil, &result)
 	return result, err
 }
 
@@ -111,6 +135,26 @@ func (c *Client) Create(
 	}
 	var result model.Instance
 	err := c.do(ctx, http.MethodPost, "/api/v1/instances", body, &result)
+	return result, err
+}
+
+func (c *Client) Switch(
+	ctx context.Context,
+	recipeID,
+	mode string,
+	config map[string]any,
+	portMode string,
+	port int,
+) (model.Instance, error) {
+	body := map[string]any{
+		"recipeId": recipeID,
+		"mode":     mode,
+		"config":   config,
+		"portMode": portMode,
+		"port":     port,
+	}
+	var result model.Instance
+	err := c.do(ctx, http.MethodPost, "/api/v1/instances/switch", body, &result)
 	return result, err
 }
 

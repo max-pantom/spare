@@ -128,6 +128,13 @@ func PackDirectory(source, destination string) error {
 }
 
 func ReadFile(packagePath, name string) ([]byte, error) {
+	return ReadFileLimit(packagePath, name, maxPackageFileSize)
+}
+
+func ReadFileLimit(packagePath, name string, maximum int64) ([]byte, error) {
+	if maximum <= 0 || maximum > maxPackageFileSize {
+		return nil, errors.New("invalid package file size limit")
+	}
 	archive, err := zip.OpenReader(packagePath)
 	if err != nil {
 		return nil, err
@@ -141,14 +148,14 @@ func ReadFile(packagePath, name string) ([]byte, error) {
 		if file.Name != cleanName {
 			continue
 		}
-		if file.UncompressedSize64 > maxPackageFileSize {
+		if file.UncompressedSize64 > uint64(maximum) {
 			return nil, errors.New("package file is too large")
 		}
 		reader, err := file.Open()
 		if err != nil {
 			return nil, err
 		}
-		data, readErr := io.ReadAll(io.LimitReader(reader, maxPackageFileSize+1))
+		data, readErr := io.ReadAll(io.LimitReader(reader, maximum+1))
 		closeErr := reader.Close()
 		if readErr != nil {
 			return nil, readErr
@@ -156,7 +163,7 @@ func ReadFile(packagePath, name string) ([]byte, error) {
 		if closeErr != nil {
 			return nil, closeErr
 		}
-		if len(data) > maxPackageFileSize {
+		if int64(len(data)) > maximum {
 			return nil, errors.New("package file is too large")
 		}
 		return data, nil

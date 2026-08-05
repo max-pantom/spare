@@ -187,7 +187,7 @@ func TestReplayRejectsUnsafeInputAndCrossOriginBrowserRequests(t *testing.T) {
 	}
 }
 
-func TestPageDoesNotExposeAPIsToFraming(t *testing.T) {
+func TestPageOnlyAllowsSpareAndLocalPreviewFraming(t *testing.T) {
 	response := httptest.NewRecorder()
 	newServer().routes().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
 	if response.Code != http.StatusOK {
@@ -196,8 +196,8 @@ func TestPageDoesNotExposeAPIsToFraming(t *testing.T) {
 	if !strings.Contains(response.Body.String(), "See every request") {
 		t.Fatal("Hook page content is missing")
 	}
-	if !strings.Contains(response.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'") {
-		t.Fatal("Hook page does not deny framing")
+	if !strings.Contains(response.Header().Get("Content-Security-Policy"), "frame-ancestors 'self' wails://wails") {
+		t.Fatal("Hook page does not restrict framing to Spare")
 	}
 }
 

@@ -22,6 +22,7 @@ import (
 	"github.com/spare-run/spare/internal/backup"
 	"github.com/spare-run/spare/internal/bootstrap"
 	"github.com/spare-run/spare/internal/doctor"
+	"github.com/spare-run/spare/internal/jobpackage"
 	"github.com/spare-run/spare/internal/model"
 	"github.com/spare-run/spare/internal/paths"
 	"github.com/spare-run/spare/internal/permissions"
@@ -29,6 +30,7 @@ import (
 	"github.com/spare-run/spare/internal/recipe"
 	"github.com/spare-run/spare/internal/recipes"
 	"github.com/spare-run/spare/internal/recipeview"
+	"github.com/spare-run/spare/internal/support"
 	"github.com/spare-run/spare/internal/uninstall"
 	"github.com/spf13/cobra"
 )
@@ -66,6 +68,7 @@ func (a *app) rootCommand() *cobra.Command {
 	command.AddCommand(
 		a.initCommand(),
 		a.recipeCommand(),
+		a.jobCommand(),
 		a.viewCommand(),
 		a.tryCommand(),
 		a.installCommand(),
@@ -75,11 +78,41 @@ func (a *app) rootCommand() *cobra.Command {
 		a.actionCommand("stop"),
 		a.logsCommand(),
 		a.doctorCommand(),
+		a.supportCommand(),
 		a.removeCommand(),
 		a.exportCommand(),
 		a.importCommand(),
 		a.uninstallCommand(),
 	)
+	return command
+}
+
+func (a *app) supportCommand() *cobra.Command {
+	command := &cobra.Command{
+		Use:   "support",
+		Short: "Create privacy-safe diagnostics for a support request",
+	}
+	command.AddCommand(&cobra.Command{
+		Use:   "bundle [destination.zip]",
+		Short: "Create a support bundle without private content",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(command *cobra.Command, args []string) error {
+			destination := support.DefaultName(time.Now())
+			if len(args) == 1 {
+				destination = args[0]
+			}
+			client, err := api.Discover(a.paths)
+			if err != nil {
+				client = nil
+			}
+			created, err := support.Create(command.Context(), destination, version, client, a.paths)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(a.out, "Support bundle created:\n%s\n", created)
+			return nil
+		},
+	})
 	return command
 }
 
@@ -196,6 +229,7 @@ func (a *app) recipeCommand() *cobra.Command {
 			},
 		},
 		a.recipePackCommand(),
+		a.recipeSignCommand(),
 		&cobra.Command{
 			Use:   "inspect <recipe|directory|manifest|package.sp>",
 			Short: "Print a recipe manifest",
@@ -206,6 +240,90 @@ func (a *app) recipeCommand() *cobra.Command {
 					return err
 				}
 				return writePrettyJSON(a.out, manifest)
+			},
+		},
+	)
+	return command
+}
+
+func (a *app) recipeSignCommand() *cobra.Command {
+	var keyPath string
+	var minimumSpare string
+	command := &cobra.Command{
+		Use:   "sign <package.sp>",
+		Short: "Sign a first-party catalog package",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(command *cobra.Command, args []string) error {
+			if keyPath == "" {
+				keyPath = os.Getenv("SPARE_CATALOG_SIGNING_KEY")
+			}
+			if keyPath == "" {
+				return errors.New("set SPARE_CATALOG_SIGNING_KEY or use --key")
+			}
+			key, err := jobpackage.LoadPrivateKey(keyPath)
+			if err != nil {
+				return err
+			}
+			envelope, err := jobpackage.Sign(args[0], key, minimumSpare)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(a.out, "Signed %s\nPublisher: %s\nDigest: %s\n", args[0], envelope.Publisher, envelope.Digest)
+			return nil
+		},
+	}
+	command.Flags().StringVar(&keyPath, "key", "", "Ed25519 private key in PKCS#8 PEM format")
+	command.Flags().StringVar(&minimumSpare, "minimum-spare-version", "0.1.1-alpha.3", "oldest compatible Spare version")
+	return command
+}
+
+func (a *app) jobCommand() *cobra.Command {
+	command := &cobra.Command{
+		Use:   "job",
+		Short: "Manage optional first-party jobs",
+	}
+	command.AddCommand(
+		&cobra.Command{
+			Use:   "add <package.sp>",
+			Short: "Verify and add a downloaded job package",
+			Args:  cobra.ExactArgs(1),
+			RunE: func(command *cobra.Command, args []string) error {
+				client, err := api.Discover(a.paths)
+				if err != nil {
+					return err
+				}
+				review, err := client.ReviewJobPackage(command.Context(), args[0])
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(a.out, "%s %s\nPublisher: %s\nSignature: %s\n", review.Title, review.Version, review.Publisher, review.SignatureStatus)
+				for _, permission := range review.Permissions {
+					if permission.Granted {
+						fmt.Fprintf(a.out, "- %s\n", permission.Description)
+					}
+				}
+				value, err := client.InstallJobPackage(command.Context(), args[0])
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(a.out, "\nInstalled %s %s. The active job was not changed.\n", review.Title, value.Version)
+				return nil
+			},
+		},
+		&cobra.Command{
+			Use:   "remove <job>",
+			Short: "Uninstall an inactive optional job",
+			Args:  cobra.ExactArgs(1),
+			RunE: func(command *cobra.Command, args []string) error {
+				client, err := api.Discover(a.paths)
+				if err != nil {
+					return err
+				}
+				if err := client.UninstallJobPackage(command.Context(), args[0]); err != nil {
+					return err
+				}
+				fmt.Fprintf(a.out, "Uninstalled %s. Job data was left unchanged.\n", args[0])
+				return nil
 			},
 		},
 	)
@@ -583,12 +701,24 @@ func (a *app) logsCommand() *cobra.Command {
 
 func (a *app) doctorCommand() *cobra.Command {
 	var asJSON bool
+	var security bool
 	command := &cobra.Command{
 		Use:   "doctor",
 		Short: "Check Spare and explain problems",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			client, err := api.Discover(a.paths)
+			if security {
+				if err != nil {
+					client = nil
+				}
+				report := doctor.RunSecurity(command.Context(), client, a.paths)
+				if asJSON {
+					return writePrettyJSON(a.out, report)
+				}
+				printDoctor(a.out, report)
+				return nil
+			}
 			if err != nil {
 				report := doctor.Run(command.Context(), nil, a.paths)
 				if asJSON {
@@ -606,6 +736,7 @@ func (a *app) doctorCommand() *cobra.Command {
 		},
 	}
 	command.Flags().BoolVar(&asJSON, "json", false, "print JSON")
+	command.Flags().BoolVar(&security, "security", false, "check local security boundaries and exposure")
 	return command
 }
 
@@ -766,11 +897,31 @@ func (a *app) uninstallCommand() *cobra.Command {
 }
 
 func (a *app) runnableManifest(reference string) (recipe.Manifest, error) {
-	registry, err := recipes.Builtins()
+	registry, err := recipes.Trusted()
 	if err != nil {
 		return recipe.Manifest{}, err
 	}
 	if implementation, ok := registry.Get(reference); ok {
+		if reference != model.RecipeSite && reference != model.RecipeDrop && reference != model.RecipeHook {
+			client, discoverErr := api.Discover(a.paths)
+			if discoverErr != nil {
+				return recipe.Manifest{}, errors.New("start Spare and install this optional job package first")
+			}
+			available, listErr := client.Recipes(context.Background())
+			if listErr != nil {
+				return recipe.Manifest{}, listErr
+			}
+			found := false
+			for _, candidate := range available {
+				if candidate.ID == reference {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return recipe.Manifest{}, fmt.Errorf("%s is trusted but not installed; run `spare job add <package.sp>` first", implementation.Manifest().Name)
+			}
+		}
 		return implementation.Manifest(), nil
 	}
 	manifest, err := recipe.Load(reference)
@@ -779,7 +930,7 @@ func (a *app) runnableManifest(reference string) (recipe.Manifest, error) {
 	}
 	implementation, ok := registry.Get(manifest.ID)
 	if !ok {
-		return recipe.Manifest{}, fmt.Errorf("%s is valid, but this preview runs only the built-in Site, Drop, and Hook recipes", manifest.Name)
+		return recipe.Manifest{}, fmt.Errorf("%s is valid, but this Spare release does not include its trusted implementation", manifest.Name)
 	}
 	if !reflect.DeepEqual(manifest, implementation.Manifest()) {
 		return recipe.Manifest{}, fmt.Errorf("%s is a valid package, but its manifest does not match the trusted built-in %s recipe", reference, manifest.Name)

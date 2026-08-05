@@ -3,7 +3,9 @@ package state
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -77,6 +79,82 @@ func TestStorePersistsMachineInstanceAndEvents(t *testing.T) {
 	}
 }
 
+func TestOpenRecoveringPreservesCorruptDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "spare.db")
+	original := []byte("not a sqlite database")
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	store, recovered, err := OpenRecovering(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if recovered == nil || recovered.DatabasePath == "" {
+		t.Fatal("corrupt database was not reported as recovered")
+	}
+	preserved, err := os.ReadFile(recovered.DatabasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(preserved) != string(original) {
+		t.Fatalf("preserved database = %q", preserved)
+	}
+	if _, err := store.Instances(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestQuarantinePreflightsEverySQLiteFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires additional privileges on Windows")
+	}
+	path := filepath.Join(t.TempDir(), "spare.db")
+	if err := os.WriteFile(path, []byte("corrupt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(path, path+"-wal"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := quarantineDatabase(path, time.Now().UTC()); err == nil {
+		t.Fatal("unsafe SQLite sidecar was accepted")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("main database moved before sidecars were validated")
+	}
+}
+
+func TestOpenRecoveringHandlesTruncatedSQLiteDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "spare.db")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveMachine(context.Background(), model.Machine{ID: "before-corruption"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(path, info.Size()/2); err != nil {
+		t.Fatal(err)
+	}
+
+	recoveredStore, recovered, err := OpenRecovering(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recoveredStore.Close()
+	if recovered == nil {
+		t.Fatal("truncated database was not preserved")
+	}
+}
+
 func TestStorePublishesCommittedEvents(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
@@ -124,7 +202,34 @@ func TestMigrationRecordsCurrentSchemaVersion(t *testing.T) {
 	if err := database.QueryRow(`SELECT value FROM metadata WHERE key = 'schema_version'`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != "2" {
+	if version != "3" {
 		t.Fatalf("schema version = %q", version)
+	}
+}
+
+func TestJobProfileRoundTrip(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	profile := model.JobProfile{
+		RecipeID: "downloads",
+		Config:   map[string]any{"destination": "/tmp/downloads"},
+		Port:     7344,
+		PortMode: "fixed",
+	}
+	if err := store.PutJobProfile(context.Background(), profile); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.JobProfile(context.Background(), "downloads")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.RecipeID != profile.RecipeID ||
+		stored.Config["destination"] != "/tmp/downloads" ||
+		stored.Port != 7344 ||
+		stored.PortMode != "fixed" {
+		t.Fatalf("profile = %#v", stored)
 	}
 }

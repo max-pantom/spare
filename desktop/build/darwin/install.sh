@@ -40,6 +40,27 @@ esac
 
 mkdir -p "$target_root"
 if [ -d "$target_app" ]; then
+  stop_installed_process() {
+    executable=$1
+    process_ids=$(ps -Ao pid=,comm= | awk -v executable="$executable" '$2 == executable {print $1}')
+    if [ -z "$process_ids" ]; then
+      return
+    fi
+    kill $process_ids 2>/dev/null || true
+    attempts=0
+    while [ "$attempts" -lt 20 ]; do
+      process_ids=$(ps -Ao pid=,comm= | awk -v executable="$executable" '$2 == executable {print $1}')
+      if [ -z "$process_ids" ]; then
+        return
+      fi
+      attempts=$((attempts + 1))
+      sleep 0.1
+    done
+    kill -KILL $process_ids 2>/dev/null || true
+  }
+
+  stop_installed_process "$target_app/Contents/MacOS/Spare"
+  stop_installed_process "$target_app/Contents/MacOS/spared"
   archive="$HOME/.Trash/Spare-previous-$(date +%Y%m%d-%H%M%S).app"
   mkdir -p "$HOME/.Trash"
   mv "$target_app" "$archive"

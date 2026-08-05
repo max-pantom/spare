@@ -5,6 +5,8 @@ package desktop
 import (
 	"context"
 	"errors"
+	"net/netip"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +18,7 @@ import (
 	"github.com/spare-run/spare/internal/bootstrap"
 	"github.com/spare-run/spare/internal/model"
 	"github.com/spare-run/spare/internal/paths"
+	"github.com/spare-run/spare/internal/recipes/shared/pairing"
 	"github.com/spare-run/spare/internal/uninstall"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -119,12 +122,20 @@ func (a *App) Snapshot() (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
+	devices := []pairing.ConnectedDevice{}
+	if len(instances) > 0 {
+		devices, _ = pairing.ReadConnectedDevices(
+			filepath.Join(a.paths.JobData, instances[0].RecipeID),
+			time.Now(),
+		)
+	}
 	snapshot := Snapshot{
 		Surface:     "desktop",
 		Machine:     machine,
 		Recipes:     recipes,
 		Instances:   instances,
 		Events:      events,
+		Devices:     devices,
 		Preferences: loadPreferences(a.paths.Root),
 	}
 	a.stateMu.Lock()
@@ -144,6 +155,87 @@ func (a *App) CreateInstance(input CreateInput) (model.Instance, error) {
 		_, _ = a.Snapshot()
 	}
 	return instance, err
+}
+
+func (a *App) SwitchInstance(input CreateInput) (model.Instance, error) {
+	client, err := a.ensureConnected(a.ctx)
+	if err != nil {
+		return model.Instance{}, err
+	}
+	instance, err := client.Switch(a.ctx, input.RecipeID, input.Mode, input.Config, input.PortMode, input.Port)
+	if err == nil {
+		_, _ = a.Snapshot()
+	}
+	return instance, err
+}
+
+func (a *App) ReviewJobPackage(source string) (model.JobPackageReview, error) {
+	if source == "" {
+		selected, err := a.ChooseFile("recipe")
+		if err != nil || selected == "" {
+			return model.JobPackageReview{}, err
+		}
+		source = selected
+	}
+	client, err := a.ensureConnected(a.ctx)
+	if err != nil {
+		return model.JobPackageReview{}, err
+	}
+	return client.ReviewJobPackage(a.ctx, source)
+}
+
+func (a *App) InstallJobPackage(source string) (model.JobPackage, error) {
+	client, err := a.ensureConnected(a.ctx)
+	if err != nil {
+		return model.JobPackage{}, err
+	}
+	value, err := client.InstallJobPackage(a.ctx, source)
+	if err == nil {
+		_, _ = a.Snapshot()
+	}
+	return value, err
+}
+
+func (a *App) UninstallJobPackage(id string) error {
+	client, err := a.ensureConnected(a.ctx)
+	if err != nil {
+		return err
+	}
+	if err := client.UninstallJobPackage(a.ctx, id); err != nil {
+		return err
+	}
+	_, _ = a.Snapshot()
+	return nil
+}
+
+func (a *App) JobProfile(id string) (model.JobProfile, error) {
+	client, err := a.ensureConnected(a.ctx)
+	if err != nil {
+		return model.JobProfile{}, err
+	}
+	return client.JobProfile(a.ctx, id)
+}
+
+func (a *App) OpenJobCatalog() error {
+	value := os.Getenv("SPARE_CATALOG_URL")
+	if value == "" {
+		value = "https://spare.run/jobs/"
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Host == "" || parsed.User != nil {
+		return errors.New("the Spare job catalog address is invalid")
+	}
+	loopback := false
+	if address, parseErr := netip.ParseAddr(parsed.Hostname()); parseErr == nil {
+		loopback = address.IsLoopback()
+	}
+	if parsed.Scheme != "https" &&
+		!(parsed.Scheme == "http" &&
+			(loopback || parsed.Hostname() == "localhost")) {
+		return errors.New("Spare opens job catalogs only over HTTPS")
+	}
+	wailsruntime.BrowserOpenURL(a.ctx, value)
+	return nil
 }
 
 func (a *App) StartInstance(id string) (model.Instance, error) {

@@ -10,8 +10,8 @@ func TestBuildDefinitions(t *testing.T) {
 		goos     string
 		contains []string
 	}{
-		{"darwin", []string{"run.spare.spared", "LaunchAgents", "/Applications/Spare/spared"}},
-		{"linux", []string{"spared.service", "WantedBy=default.target", `ExecStart="/Applications/Spare/spared"`}},
+		{"darwin", []string{"run.spare.spared", "LaunchAgents", "/Applications/Spare/spared", "<key>Umask</key>", "<integer>63</integer>"}},
+		{"linux", []string{"spared.service", "WantedBy=default.target", `ExecStart="/Applications/Spare/spared"`, "NoNewPrivileges=true", "PrivateTmp=true", "MemoryDenyWriteExecute=true", "CapabilityBoundingSet="}},
 		{"windows", []string{"Spare", `"/Applications/Spare/spared"`}},
 	}
 	for _, test := range tests {

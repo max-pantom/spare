@@ -26,6 +26,11 @@
   <true/>
   <key>NSLocalNetworkUsageDescription</key>
   <string>Spare shares the selected recipe with devices on your local network.</string>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>

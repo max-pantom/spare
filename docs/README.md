@@ -1,6 +1,7 @@
 # Spare documentation
 
-These guides describe **Spare 0.1 Preview**, machine-readable version `0.1.0`.
+These guides describe **Spare 0.1 Preview**, machine-readable version
+`0.1.1-alpha.3`.
 
 ## Start here
 
@@ -9,6 +10,7 @@ These guides describe **Spare 0.1 Preview**, machine-readable version `0.1.0`.
 - [Use Spare Desktop](DESKTOP.md)
 - [Test Spare](TESTING.md)
 - [Use the built-in recipes](BUILT-IN-RECIPES.md)
+- [Install and use optional jobs](JOBS.md)
 - [Use the CLI](USAGE.md)
 - [Build recipe packages](RECIPES.md)
 - [Export and restore data](BACKUP.md)

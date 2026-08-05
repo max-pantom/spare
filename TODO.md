@@ -19,6 +19,13 @@ that remain deliberately outside the trusted built-in V1 boundary.
   file associations.
 - [x] Add SHA-256 verification, safe extraction, platform artifact selection,
   caching paths, downloads, and atomic replacement.
+- [x] Add the signed first-party job catalog. Optional `.sp` packages contain
+  metadata only and can unlock only an exact trusted implementation already
+  compiled into the same Spare release.
+- [x] Bound optional package size and contents, stage installation in private
+  storage, and reverify the installed copy before making a job available.
+- [x] Bound Clipboard and Monitor storage, queues, histories, sessions, request
+  sizes, redirects, and persisted state for the first downloadable job wave.
 - [x] Add Drop with browser upload/download, progress, size limits, available
   storage, collision-safe names, and selected-folder preservation.
 - [x] Add Hook with bounded in-memory request history, detailed inspection,
@@ -38,7 +45,8 @@ that remain deliberately outside the trusted built-in V1 boundary.
 - [x] Add manifest-driven visual recipe setup and a native folder picker.
 - [x] Make the desktop process own temporary recipe heartbeats and promotion.
 - [x] Add live activity streaming and structured Drop receipt events.
-- [x] Add QR sharing, native notifications, and macOS menu-bar controls.
+- [x] Add QR sharing, native notifications, and hardened macOS menu-bar
+  controls with the Spare mark, live Drop progress, and recovery states.
 - [x] Add separate menu-bar, desktop-login, and recipe-restore preferences.
 - [x] Add settings, repair, safe removal, and uninstall entry points.
 - [x] Build a single macOS ARM64 bundle containing the GUI, CLI, daemon,
@@ -49,7 +57,7 @@ that remain deliberately outside the trusted built-in V1 boundary.
   installer, and uninstaller as one checksummed archive.
 - [x] Add the native Linux GTK/AppIndicator tray, per-user installer, and
   amd64/arm64 packaging path.
-- [ ] Complete a hands-on Apple Silicon install, notification, menu-bar, login
+- [x] Complete a hands-on Apple Silicon install, notification, menu-bar, login
   restart, and uninstall acceptance pass before publishing the Desktop Alpha.
 - [ ] Validate the Windows amd64 archive, tray, WebView2 shell, login restart,
   and uninstall on Windows 11.
@@ -60,7 +68,7 @@ that remain deliberately outside the trusted built-in V1 boundary.
 
 - [ ] Run the complete install, login, Site, Drop, Hook, export, removal, and
   uninstall flow on a clean macOS 13+ Intel machine.
-- [ ] Run the same flow on Apple Silicon.
+- [x] Run the same flow on Apple Silicon.
 - [ ] Run the same flow on Windows 11 amd64.
 - [ ] Run the same flow on Windows 11 ARM64.
 - [ ] Run the same flow on Ubuntu 22.04+ and Debian 12+.
@@ -86,22 +94,37 @@ that remain deliberately outside the trusted built-in V1 boundary.
 
 ## Harden the engineering preview
 
-- [ ] Recover cleanly from a corrupt or partially written SQLite database.
+- [x] Harden local credentials, endpoint discovery, private state paths, login
+  service definitions, and uninstall liveness checks.
+- [x] Add `spare doctor --security` with explicit package, network, service,
+  state-permission, executable-integrity, and worker-isolation reporting.
+- [x] Pin CI actions and add race detection, Go vulnerability analysis,
+  CodeQL, dependency review, and release provenance attestations.
+- [ ] Enforce and verify owner-only Windows ACLs for credentials, endpoint
+  state, logs, packages, and job data instead of relying only on inherited
+  `%LOCALAPPDATA%` permissions.
+- [ ] Put built-in workers behind platform filesystem and process isolation
+  while preserving explicitly selected folders and required local-network
+  access.
+- [x] Preserve a corrupt or partially written SQLite database, create fresh
+  state, and record the recovery in Activity.
 - [ ] Add integration coverage for LAN changes while a recipe is running.
 - [x] Record Drop transfers as structured daemon activity without weakening the
   worker boundary.
-- [ ] Add clearer guidance when the operating-system firewall blocks LAN
+- [x] Add clearer guidance when the operating-system firewall may block LAN
   access.
-- [ ] Add non-ASCII hostname and mDNS conflict-resolution coverage.
-- [ ] Generate stable JSON schema and API reference documentation.
-- [ ] Add a support bundle that excludes API tokens, backups, and selected
+- [x] Add bounded non-ASCII hostname handling and stable per-machine mDNS
+  service names that avoid common name conflicts.
+- [x] Generate stable JSON Schema and API endpoint reference documentation.
+- [x] Add a support bundle that excludes API tokens, identity, network
+  addresses, configuration, logs, backups, and selected
   folder contents.
 - [ ] Add encrypted backups or explicit integration with an operating-system
   secret/storage provider.
 - [ ] Add malware-scanning hooks before positioning Drop for untrusted
   networks.
 
-## External recipes
+## Third-party recipes
 
 - [ ] Define publisher identity, signatures, provenance, and revocation.
 - [ ] Pin and verify packaged binary checksums from the manifest.
@@ -111,8 +134,10 @@ that remain deliberately outside the trusted built-in V1 boundary.
 - [x] Run a third recipe without adding recipe-specific platform code. Hook
   demonstrates this platform acceptance test.
 
-Until these are complete, `.sp` packages with IDs other than `site`, `drop`,
-or `hook` can be validated and inspected but cannot execute.
+Until these are complete, an arbitrary `.sp` package can be validated and
+inspected but cannot supply executable code. The optional-job installer accepts
+only Spare-signed metadata whose manifest exactly matches a trusted
+implementation already compiled into that Spare release.
 
 ## Release engineering after the preview
 

@@ -36,14 +36,34 @@ Expected results:
 Run the vulnerability and dependency checks separately:
 
 ```bash
-go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
 cd dashboard && npm audit
 ```
+
+Regenerate the public API reference after changing a JSON model or endpoint:
+
+```bash
+make schema
+go test ./internal/apischema ./internal/api
+```
+
+Create a privacy-safe diagnostic archive and inspect its two entries before
+sharing it:
+
+```bash
+spare support bundle ./spare-support.zip
+unzip -l ./spare-support.zip
+```
+
+Automated state tests truncate and replace SQLite files to confirm Spare
+preserves corrupt bytes before creating fresh state. They also verify that a
+support bundle cannot contain API tokens, identity, network addresses,
+configuration, selected paths, or user content.
 
 Build and verify all release archives and recipe packages:
 
 ```bash
-make release VERSION=0.1.0
+make release VERSION=0.1.1-alpha.3
 cd dist/releases
 shasum -a 256 -c checksums.txt
 ```
@@ -55,10 +75,10 @@ On Linux, use `sha256sum -c checksums.txt` if `shasum` is unavailable.
 Build and verify the archive for the current Mac:
 
 ```bash
-make desktop-package VERSION=0.1.0
+make desktop-package VERSION=0.1.1-alpha.3
 cd dist/desktop
 shasum -a 256 -c checksums.txt
-unzip spare-desktop_0.1.0_darwin_$(test "$(uname -m)" = x86_64 && echo amd64 || echo arm64).zip
+unzip spare-desktop_0.1.1-alpha.3_darwin_$(test "$(uname -m)" = x86_64 && echo amd64 || echo arm64).zip
 ./install.sh
 ```
 
@@ -86,7 +106,9 @@ this complete path:
     with collision-safe names and updates Activity.
 15. Drag a folder onto an idle Spare and confirm Site setup opens with the
     canonical folder selected.
-16. Drag a `.sp` package and confirm only the safe package viewer opens.
+16. Drag a catalog `.sp` package and confirm its native signature and
+    permission review opens. Select **Inspect package** and confirm the safe
+    inert viewer remains available.
 17. Export a backup in Settings, remove the current job, drag the backup into
     Spare, restore it to an empty folder, and confirm the installed state.
 18. Configure the active recipe with another folder and confirm the former
@@ -103,22 +125,23 @@ this complete path:
     enabled.
 
 The automated desktop test uses the same React surface with a bounded Wails
-bridge mock. Native folder dialogs, menu-bar interaction, notifications,
-LaunchAgents, login restart, and Finder removal still require this hands-on
-macOS pass.
+bridge mock. The Apple Silicon hands-on pass is complete. Native folder
+dialogs, menu-bar interaction, notifications, LaunchAgents, login restart, and
+Finder removal still require separate hands-on acceptance on each remaining
+supported platform.
 
 ## Test the Windows Desktop Alpha
 
 Build the archive and verify its checksum:
 
 ```bash
-make desktop-windows-package VERSION=0.1.0
+make desktop-windows-package VERSION=0.1.1-alpha.3
 cd dist/desktop
 shasum -a 256 -c checksums.txt
 ```
 
 In a clean Windows 11 amd64 VM, extract
-`spare-desktop_0.1.0_windows_amd64.zip`, run `install.ps1`, and repeat the
+`spare-desktop_0.1.1-alpha.3_windows_amd64.zip`, run `install.ps1`, and repeat the
 complete desktop path above. Also verify:
 
 - `Spare.exe` and `spared.exe` are GUI-subsystem executables while
@@ -137,7 +160,7 @@ On Ubuntu or Debian, install the native build dependencies listed in
 [Use Spare Desktop](DESKTOP.md), then run:
 
 ```bash
-make desktop-linux-package VERSION=0.1.0
+make desktop-linux-package VERSION=0.1.1-alpha.3
 cd dist/desktop
 shasum -a 256 -c checksums.txt
 ```

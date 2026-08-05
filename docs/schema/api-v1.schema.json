@@ -1,0 +1,723 @@
+{
+  "$defs": {
+    "APIError": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "hint": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "Capabilities": {
+      "additionalProperties": false,
+      "properties": {
+        "canRunContainers": {
+          "type": "boolean"
+        },
+        "canRunPersistent": {
+          "type": "boolean"
+        },
+        "canServeLAN": {
+          "type": "boolean"
+        },
+        "canStoreLargeFiles": {
+          "type": "boolean"
+        },
+        "hasBattery": {
+          "type": "boolean"
+        },
+        "hasExternalStorage": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "canServeLAN",
+        "canRunPersistent",
+        "canStoreLargeFiles",
+        "canRunContainers",
+        "hasBattery",
+        "hasExternalStorage"
+      ],
+      "type": "object"
+    },
+    "Compatibility": {
+      "additionalProperties": false,
+      "properties": {
+        "rating": {
+          "type": "string"
+        },
+        "reasons": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "supported",
+        "rating",
+        "reasons",
+        "warnings"
+      ],
+      "type": "object"
+    },
+    "ConfigField": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {},
+        "description": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "label",
+        "required"
+      ],
+      "type": "object"
+    },
+    "ErrorEnvelope": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/APIError"
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "type": "object"
+    },
+    "Event": {
+      "additionalProperties": false,
+      "properties": {
+        "createdAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "details": {
+          "additionalProperties": {},
+          "type": "object"
+        },
+        "id": {
+          "type": "integer"
+        },
+        "instanceId": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "level": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "level",
+        "kind",
+        "message",
+        "createdAt"
+      ],
+      "type": "object"
+    },
+    "Instance": {
+      "additionalProperties": false,
+      "properties": {
+        "config": {
+          "additionalProperties": {},
+          "type": "object"
+        },
+        "createdAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "dataPath": {
+          "type": "string"
+        },
+        "desiredState": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "itemCount": {
+          "type": "integer"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer"
+        },
+        "portMode": {
+          "type": "string"
+        },
+        "problem": {
+          "$ref": "#/$defs/Problem"
+        },
+        "recipeId": {
+          "type": "string"
+        },
+        "rootPath": {
+          "type": "string"
+        },
+        "runtime": {
+          "type": "string"
+        },
+        "startedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "storageAvailableBytes": {
+          "type": "integer"
+        },
+        "updatedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "urls": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "recipeId",
+        "version",
+        "runtime",
+        "mode",
+        "desiredState",
+        "status",
+        "rootPath",
+        "dataPath",
+        "config",
+        "port",
+        "portMode",
+        "urls",
+        "storageAvailableBytes",
+        "itemCount",
+        "createdAt",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "JobPackage": {
+      "additionalProperties": false,
+      "properties": {
+        "checksum": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "installedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "minimumSpareVersion": {
+          "type": "string"
+        },
+        "publisher": {
+          "type": "string"
+        },
+        "signature": {
+          "type": "string"
+        },
+        "signatureStatus": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "publisher",
+        "minimumSpareVersion",
+        "checksum",
+        "signature",
+        "signatureStatus",
+        "installedAt"
+      ],
+      "type": "object"
+    },
+    "JobPackageReview": {
+      "additionalProperties": false,
+      "properties": {
+        "alreadyInstalled": {
+          "type": "boolean"
+        },
+        "checksum": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "minimumSpareVersion": {
+          "type": "string"
+        },
+        "permissions": {
+          "items": {
+            "$ref": "#/$defs/PermissionGrant"
+          },
+          "type": "array"
+        },
+        "publisher": {
+          "type": "string"
+        },
+        "signatureStatus": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "version",
+        "description",
+        "publisher",
+        "minimumSpareVersion",
+        "checksum",
+        "signatureStatus",
+        "permissions",
+        "alreadyInstalled"
+      ],
+      "type": "object"
+    },
+    "JobProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "config": {
+          "additionalProperties": {},
+          "type": "object"
+        },
+        "port": {
+          "type": "integer"
+        },
+        "portMode": {
+          "type": "string"
+        },
+        "recipeId": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "recipeId",
+        "config",
+        "port",
+        "portMode",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "Machine": {
+      "additionalProperties": false,
+      "properties": {
+        "architecture": {
+          "type": "string"
+        },
+        "capabilities": {
+          "$ref": "#/$defs/Capabilities"
+        },
+        "hostname": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "initializedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "lanAddresses": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "lastProfiledAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "logicalCores": {
+          "type": "integer"
+        },
+        "memoryTotalBytes": {
+          "type": "integer"
+        },
+        "os": {
+          "type": "string"
+        },
+        "storageAvailableBytes": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "hostname",
+        "os",
+        "architecture",
+        "logicalCores",
+        "memoryTotalBytes",
+        "storageAvailableBytes",
+        "lanAddresses",
+        "capabilities",
+        "initializedAt",
+        "lastProfiledAt"
+      ],
+      "type": "object"
+    },
+    "PermissionGrant": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "granted": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "description",
+        "granted"
+      ],
+      "type": "object"
+    },
+    "Problem": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "recovery": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "severity",
+        "summary",
+        "recovery"
+      ],
+      "type": "object"
+    },
+    "Recipe": {
+      "additionalProperties": false,
+      "properties": {
+        "checksum": {
+          "type": "string"
+        },
+        "compatibility": {
+          "$ref": "#/$defs/Compatibility"
+        },
+        "config": {
+          "items": {
+            "$ref": "#/$defs/ConfigField"
+          },
+          "type": "array"
+        },
+        "description": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "installation": {
+          "type": "string"
+        },
+        "minimumSpareVersion": {
+          "type": "string"
+        },
+        "packageVersion": {
+          "type": "string"
+        },
+        "permissions": {
+          "items": {
+            "$ref": "#/$defs/PermissionGrant"
+          },
+          "type": "array"
+        },
+        "publisher": {
+          "type": "string"
+        },
+        "resources": {
+          "$ref": "#/$defs/ResourceGuidance"
+        },
+        "runtime": {
+          "type": "string"
+        },
+        "signatureStatus": {
+          "type": "string"
+        },
+        "supportedSystems": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "version",
+        "description",
+        "runtime",
+        "supportedSystems",
+        "resources",
+        "config",
+        "permissions",
+        "compatibility",
+        "installation"
+      ],
+      "type": "object"
+    },
+    "ResourceGuidance": {
+      "additionalProperties": false,
+      "properties": {
+        "cpuMaximum": {
+          "type": "integer"
+        },
+        "memoryMaximumBytes": {
+          "type": "integer"
+        },
+        "memoryRecommendedBytes": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "memoryRecommendedBytes",
+        "memoryMaximumBytes",
+        "cpuMaximum"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://spare.run/schema/api-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Stable public response models for Spare's authenticated loopback API.",
+  "title": "Spare local API v1",
+  "x-spare-endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/v1/health",
+      "access": "authenticated",
+      "response": "Health"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/schema",
+      "access": "authenticated",
+      "response": "JSON Schema 2020-12"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/machine",
+      "access": "authenticated",
+      "response": "Machine"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/recipes",
+      "access": "authenticated",
+      "response": "Recipe[]"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/instances",
+      "access": "authenticated",
+      "response": "Instance[]"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/instances",
+      "access": "local-bearer",
+      "response": "Instance"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/instances/switch",
+      "access": "local-bearer",
+      "response": "Instance"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/instances/{id}",
+      "access": "authenticated",
+      "response": "Instance"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/instances/{id}",
+      "access": "local-bearer"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/instances/{id}/start",
+      "access": "authenticated",
+      "response": "Instance"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/instances/{id}/stop",
+      "access": "authenticated",
+      "response": "Instance"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/instances/{id}/heartbeat",
+      "access": "local-bearer"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/instances/{id}/promote",
+      "access": "local-bearer",
+      "response": "Instance"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/instances/{id}/configure",
+      "access": "local-bearer",
+      "response": "Instance"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/events",
+      "access": "authenticated",
+      "response": "Event[]"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/activity/stream",
+      "access": "authenticated",
+      "response": "Event stream"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/browser-sessions",
+      "access": "local-bearer",
+      "response": "BrowserSession"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/job-packages",
+      "access": "authenticated",
+      "response": "JobPackage[]"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/job-packages/review",
+      "access": "local-bearer",
+      "response": "JobPackageReview"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/job-packages/install",
+      "access": "local-bearer",
+      "response": "JobPackage"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/job-packages/{id}",
+      "access": "local-bearer"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/job-profiles/{id}",
+      "access": "local-bearer",
+      "response": "JobProfile"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/desktop/backups/export",
+      "access": "local-bearer"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/desktop/backups/restore",
+      "access": "local-bearer",
+      "response": "Instance"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/desktop/drop-files",
+      "access": "local-bearer"
+    }
+  ]
+}

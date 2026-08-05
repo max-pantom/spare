@@ -3,9 +3,12 @@ package model
 import "time"
 
 const (
-	RecipeSite = "site"
-	RecipeDrop = "drop"
-	RecipeHook = "hook"
+	RecipeSite      = "site"
+	RecipeDrop      = "drop"
+	RecipeHook      = "hook"
+	RecipeClipboard = "clipboard"
+	RecipeDownloads = "downloads"
+	RecipeMonitor   = "monitor"
 
 	ModeTemporary = "temporary"
 	ModeInstalled = "installed"
@@ -19,6 +22,9 @@ const (
 	StatusStopped  = "stopped"
 	StatusFailed   = "failed"
 	StatusRemoving = "removing"
+
+	InstallationBundled   = "bundled"
+	InstallationInstalled = "installed"
 )
 
 type Machine struct {
@@ -83,6 +89,47 @@ type Recipe struct {
 	Config           []ConfigField     `json:"config"`
 	Permissions      []PermissionGrant `json:"permissions"`
 	Compatibility    Compatibility     `json:"compatibility"`
+	Installation     string            `json:"installation"`
+	Publisher        string            `json:"publisher,omitempty"`
+	PackageVersion   string            `json:"packageVersion,omitempty"`
+	MinimumSpare     string            `json:"minimumSpareVersion,omitempty"`
+	Checksum         string            `json:"checksum,omitempty"`
+	SignatureStatus  string            `json:"signatureStatus,omitempty"`
+}
+
+type JobPackage struct {
+	ID              string    `json:"id"`
+	Version         string    `json:"version"`
+	Publisher       string    `json:"publisher"`
+	MinimumSpare    string    `json:"minimumSpareVersion"`
+	Checksum        string    `json:"checksum"`
+	Signature       string    `json:"signature"`
+	SignatureStatus string    `json:"signatureStatus"`
+	ManifestJSON    []byte    `json:"-"`
+	PackagePath     string    `json:"-"`
+	Source          string    `json:"source,omitempty"`
+	InstalledAt     time.Time `json:"installedAt"`
+}
+
+type JobPackageReview struct {
+	ID               string            `json:"id"`
+	Title            string            `json:"title"`
+	Version          string            `json:"version"`
+	Description      string            `json:"description"`
+	Publisher        string            `json:"publisher"`
+	MinimumSpare     string            `json:"minimumSpareVersion"`
+	Checksum         string            `json:"checksum"`
+	SignatureStatus  string            `json:"signatureStatus"`
+	Permissions      []PermissionGrant `json:"permissions"`
+	AlreadyInstalled bool              `json:"alreadyInstalled"`
+}
+
+type JobProfile struct {
+	RecipeID  string         `json:"recipeId"`
+	Config    map[string]any `json:"config"`
+	Port      int            `json:"port"`
+	PortMode  string         `json:"portMode"`
+	UpdatedAt time.Time      `json:"updatedAt"`
 }
 
 type Problem struct {
@@ -102,6 +149,7 @@ type Instance struct {
 	Status                string         `json:"status"`
 	RootPath              string         `json:"rootPath"`
 	DataPath              string         `json:"dataPath"`
+	StatePath             string         `json:"-"`
 	Config                map[string]any `json:"config"`
 	Port                  int            `json:"port"`
 	PortMode              string         `json:"portMode"`

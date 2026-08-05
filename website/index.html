@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Download trusted first-party jobs for Spare."
+    />
+    <title>Jobs for Spare</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script type="module" src="./jobs.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#jobs">Skip to jobs</a>
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="Spare jobs home">
+        <svg
+          aria-hidden="true"
+          width="22"
+          height="22"
+          viewBox="0 0 22 22"
+          fill="none"
+        >
+          <path
+            d="M6 5v7h3V5H6Zm7 0v4h3V5h-3ZM6 15v2h10v-2H6Zm7-3v5h3v-5h-3Z"
+            fill="currentColor"
+          />
+        </svg>
+        <span>Spare</span>
+      </a>
+      <span class="catalog-trust">
+        <span aria-hidden="true">✓</span>
+        First-party catalog
+      </span>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="page-title">
+        <p class="eyebrow">Optional jobs</p>
+        <h1 id="page-title">Give this computer something new to do.</h1>
+        <p class="hero-copy">
+          Download a signed job package, open it with Spare, and review its
+          access before installing. Your current job keeps running until you
+          choose to switch.
+        </p>
+        <ol class="install-steps" aria-label="How installation works">
+          <li><span>1</span> Download a job</li>
+          <li><span>2</span> Open the <code>.sp</code> package</li>
+          <li><span>3</span> Review and install in Spare</li>
+        </ol>
+      </section>
+
+      <section id="jobs" class="catalog-section" aria-labelledby="available-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Available now</p>
+            <h2 id="available-title">Focused first wave</h2>
+          </div>
+          <p>Requires Spare 0.1.1 Alpha 3 or newer.</p>
+        </div>
+        <div id="available-jobs" class="job-grid" aria-live="polite">
+          <p class="loading" role="status">Loading available jobs…</p>
+        </div>
+      </section>
+
+      <section class="catalog-section" aria-labelledby="planned-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">On the roadmap</p>
+            <h2 id="planned-title">Planned jobs</h2>
+          </div>
+          <p>Downloads appear only after their trusted implementation ships.</p>
+        </div>
+        <div id="planned-jobs" class="job-grid planned-grid"></div>
+      </section>
+    </main>
+
+    <footer>
+      <p>Packages contain signed metadata only. Spare never runs downloaded executable code.</p>
+    </footer>
+
+    <template id="job-card-template">
+      <article class="job-card">
+        <div class="job-card-top">
+          <span class="job-icon"><img alt="" width="20" height="20" /></span>
+          <span class="job-status"></span>
+        </div>
+        <div>
+          <h3></h3>
+          <p class="job-description"></p>
+        </div>
+        <ul class="feature-list"></ul>
+        <div class="job-meta"></div>
+        <a class="download-button"></a>
+      </article>
+    </template>
+  </body>
+</html>

@@ -1,6 +1,6 @@
 # Use Spare
 
-Spare `0.1.0` gives one computer one primary recipe role. Site, Drop, and Hook
+Spare `0.1.1-alpha.3` gives one computer one active job. Site, Drop, and Hook
 use the same instance, runtime, networking, health, supervision, and lifecycle
 systems.
 
@@ -98,6 +98,7 @@ spare uninstall
 | `spare stop <recipe>` | Set the installed instance's desired state to stopped |
 | `spare logs <recipe> [--follow]` | Read or follow its rotating worker log |
 | `spare doctor [--json]` | Check daemon, dashboard, service, health, port, folder, storage, LAN, and sleep risks |
+| `spare support bundle [destination.zip]` | Create privacy-safe support diagnostics without tokens, identity, paths, logs, or user files |
 | `spare export <recipe>` | Export configuration and selected-folder data |
 | `spare import <backup> --path <empty-directory>` | Restore data and install the saved recipe |
 | `spare remove <recipe> [--yes]` | Remove instance metadata and logs, never selected-folder data |

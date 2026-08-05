@@ -16,6 +16,7 @@ Browser requests use the HttpOnly session cookie created by
 
 ```text
 GET    /api/v1/health
+GET    /api/v1/schema
 GET    /api/v1/machine
 GET    /api/v1/recipes
 GET    /api/v1/instances
@@ -23,6 +24,7 @@ GET    /api/v1/instances/{id}
 GET    /api/v1/events
 GET    /api/v1/activity/stream
 POST   /api/v1/instances
+POST   /api/v1/instances/switch
 POST   /api/v1/instances/{id}/start
 POST   /api/v1/instances/{id}/stop
 POST   /api/v1/instances/{id}/heartbeat
@@ -32,8 +34,19 @@ POST   /api/v1/browser-sessions
 POST   /api/v1/desktop/backups/export
 POST   /api/v1/desktop/backups/restore
 POST   /api/v1/desktop/drop-files
+GET    /api/v1/job-packages
+POST   /api/v1/job-packages/review
+POST   /api/v1/job-packages/install
+DELETE /api/v1/job-packages/{id}
+GET    /api/v1/job-profiles/{id}
 DELETE /api/v1/instances/{id}
 ```
+
+`GET /api/v1/schema` returns the checked-in JSON Schema 2020-12 document at
+[`schema/api-v1.schema.json`](schema/api-v1.schema.json). The document contains
+the public response models and a stable endpoint catalog. Run `make schema`
+after changing a public model; tests fail when the generated reference is
+stale.
 
 `GET /api/v1/activity/stream` is an authenticated server-sent event stream of
 newly committed `Event` values. Clients reconnect and refresh `GET
@@ -57,10 +70,25 @@ local bearer token. A browser session may inspect status and use the bounded
 start/stop controls, but it cannot select local folders or change installation
 metadata.
 
+Reviewing, installing, or uninstalling an optional job package and reading a
+saved job profile require the local bearer token. A browser session may list
+package status, but it cannot approve a downloaded file or alter the local job
+library.
+
 `POST /api/v1/instances/{id}/configure` validates the same manifest fields as
 creation. The daemon stops and restarts a running worker, keeps the old
 selected folder untouched, and restores the previous configuration if the new
 worker cannot start.
+
+`POST /api/v1/instances/switch` is the atomic one-active-job operation. It
+saves the current job's profile, stops it, and starts the requested installed
+job. If the new job cannot start, the daemon restores the previous job.
+
+The job-package review response contains the publisher, package and minimum
+Spare versions, SHA-256 checksum, signature status, and declared permission
+statements. Installation never activates the package. A package can be
+removed only while its job is inactive, and removing it does not delete
+private job state or user-selected folders.
 
 ## Create Site
 
@@ -137,8 +165,9 @@ available system storage, LAN addresses, profile timestamps, and capability
 flags.
 
 `Recipe` includes ID, title, version, description, runtime, supported systems,
-resource guidance, configuration fields, declared permissions, and machine
-compatibility.
+resource guidance, configuration fields, declared permissions, machine
+compatibility, installation state, publisher, package version, checksum, and
+signature status.
 
 `Instance` includes ID, recipe ID/version, runtime, mode, desired state,
 status, resolved configuration, selected data path, port preference, URLs,

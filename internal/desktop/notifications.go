@@ -11,12 +11,6 @@ import (
 )
 
 func (a *App) notify(event model.Event) {
-	if event.Kind != "drop_file_received" &&
-		event.Level != "error" &&
-		event.Kind != "worker_exited" &&
-		event.Kind != "hook_request_captured" {
-		return
-	}
 	recipeID := ""
 	if event.InstanceID != "" {
 		a.stateMu.RLock()
@@ -28,6 +22,15 @@ func (a *App) notify(event model.Event) {
 		}
 		a.stateMu.RUnlock()
 	}
+	monitorTransition := recipeID == model.RecipeMonitor &&
+		(event.Kind == "instance_degraded" || event.Kind == "instance_recovered")
+	if event.Kind != "drop_file_received" &&
+		event.Level != "error" &&
+		event.Kind != "worker_exited" &&
+		event.Kind != "hook_request_captured" &&
+		!monitorTransition {
+		return
+	}
 	if !preferences.NotificationsEnabled(loadPreferences(a.paths.Root), recipeID) {
 		return
 	}
@@ -36,6 +39,10 @@ func (a *App) notify(event model.Event) {
 		title = "File received"
 	} else if event.Kind == "hook_request_captured" {
 		title = "Hook captured a request"
+	} else if recipeID == model.RecipeMonitor && event.Kind == "instance_degraded" {
+		title = "Monitor found a problem"
+	} else if recipeID == model.RecipeMonitor && event.Kind == "instance_recovered" {
+		title = "Monitor recovered"
 	}
 	_ = wailsruntime.InitializeNotifications(a.ctx)
 	_ = wailsruntime.SendNotification(a.ctx, wailsruntime.NotificationOptions{

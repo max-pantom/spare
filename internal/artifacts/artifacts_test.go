@@ -44,6 +44,20 @@ func TestPackReadAndExtract(t *testing.T) {
 	}
 }
 
+func TestReadFileLimitRejectsOversizedEntry(t *testing.T) {
+	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "README.md"), []byte("123456"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	packagePath := filepath.Join(t.TempDir(), "job.sp")
+	if err := PackDirectory(source, packagePath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadFileLimit(packagePath, "README.md", 5); err == nil {
+		t.Fatal("expected the package entry size limit to be enforced")
+	}
+}
+
 func TestPackageContentIsReproducible(t *testing.T) {
 	source := t.TempDir()
 	manifest := filepath.Join(source, "spare.yml")

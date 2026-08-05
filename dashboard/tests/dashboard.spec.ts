@@ -483,6 +483,11 @@ test("reflows at 320 pixels and controls remain keyboard reachable", async ({
   await mockDashboard(page, [healthyDrop]);
   await page.goto("/#transfer");
 
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+  });
   await page.keyboard.press("Tab");
   await expect(page.getByRole("link", { name: "Skip to content" })).toBeFocused();
   await page.keyboard.press("Enter");
@@ -689,6 +694,31 @@ test("desktop first launch sets up Drop without the CLI", async ({ page }) => {
               });
               return created;
             },
+            SwitchInstance: async (input) => {
+              const selectedPath = String(
+                input.config.destination ?? input.config.path ?? ""
+              );
+              const created = {
+                ...healthyDrop,
+                id: input.recipeId,
+                recipeId: input.recipeId,
+                mode: input.mode,
+                rootPath: selectedPath,
+                dataPath: selectedPath,
+                config: input.config,
+                itemCount: 0
+              };
+              instances = [created];
+              events.unshift({
+                id: 12,
+                instanceId: input.recipeId,
+                level: "info",
+                kind: "instance_created",
+                message: `${input.recipeId} started.`,
+                createdAt: "2026-07-26T10:00:04Z"
+              });
+              return created;
+            },
             ConfigureInstance: async (_id, input) => {
               instances = [
                 {
@@ -735,6 +765,9 @@ test("desktop first launch sets up Drop without the CLI", async ({ page }) => {
             DescribeDroppedPaths: async () => [],
             PendingLaunchPaths: async () => [],
             OpenRecipePackage: async () => undefined,
+            JobProfile: async () => {
+              throw new Error("No saved job profile");
+            },
             AddDropFiles: async (_instanceId, paths) => {
               instances = [
                 {
@@ -1179,6 +1212,19 @@ test("desktop first launch sets up Drop without the CLI", async ({ page }) => {
     "font-family",
     /Inter Variable/
   );
+  await page.getByRole("button", { name: "Open Drop" }).click();
+  const jobWorkspace = page.locator(".desktop-job-workspace");
+  await expect(
+    jobWorkspace.getByRole("heading", { name: "Drop", exact: true })
+  ).toBeVisible();
+  await expect(jobWorkspace.locator("iframe")).toHaveAttribute(
+    "src",
+    "http://127.0.0.1:7340"
+  );
+  await expect(
+    jobWorkspace.getByRole("button", { name: "Open in browser" })
+  ).toBeVisible();
+  await jobWorkspace.getByRole("button", { name: "← Home" }).click();
   await page.getByRole("button", { name: "Add files to Drop" }).click();
   await expect(page.getByText("8", { exact: true })).toBeVisible();
   const scanQRButton = page.getByRole("button", { name: "Scan QR" });
@@ -1219,6 +1265,7 @@ test("desktop first launch sets up Drop without the CLI", async ({ page }) => {
 
   await page.getByRole("button", { name: "Pause" }).click();
   await expect(page.getByRole("button", { name: "Resume" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Stop job" })).toBeVisible();
   await page.getByRole("button", { name: "Resume" }).click();
   await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
   await page.getByRole("button", { name: "Configure" }).click();
@@ -1383,4 +1430,37 @@ test("desktop first launch sets up Drop without the CLI", async ({ page }) => {
       fullPage: true
     });
   }
+
+  await page.setViewportSize({ width: 930, height: 509 });
+  await sidebar.getByRole("button", { name: "Jobs", exact: true }).click();
+  const hookCard = page.locator(".desktop-job-card").filter({
+    has: page.getByRole("heading", { name: "Hook", exact: true })
+  });
+  await hookCard.getByRole("button", { name: "Switch" }).click();
+  await page.getByRole("button", { name: "Switch to Hook" }).click();
+  await page
+    .getByRole("button", { name: "Stop Drop and start Hook" })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "This computer is a Hook" })
+  ).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("button", { name: "Open Hook" }).click();
+  await expect(page.locator(".desktop-job-workspace iframe")).toHaveAttribute(
+    "src",
+    "http://127.0.0.1:7340"
+  );
+  await page
+    .locator(".desktop-job-workspace")
+    .getByRole("button", { name: "Pause" })
+    .click();
+  await expect(
+    page
+      .locator(".desktop-job-workspace")
+      .getByRole("button", { name: "Stop job" })
+  ).toBeVisible();
+  await page
+    .locator(".desktop-job-workspace")
+    .getByRole("button", { name: "Stop job" })
+    .click();
+  await expect(page.getByText("Ready for a job", { exact: true })).toBeVisible();
 });

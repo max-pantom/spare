@@ -19,10 +19,10 @@ Every release before the first stable release must be marked as a
 
 ## Current release line
 
-The first desktop release is:
+The current desktop preview is:
 
 ```text
-v0.1.1-alpha.1
+v0.1.1-alpha.3
 ```
 
 Do not reuse or move a published tag. If another early desktop build is
@@ -75,7 +75,8 @@ Use this sequence unless the scope changes:
 
 ```text
 v0.1.1-alpha.1   Spare 0.1.1 Alpha 1 — Desktop Preview
-v0.1.1-alpha.2   Additional early desktop fixes, if needed
+v0.1.1-alpha.2   Earlier desktop fixes
+v0.1.1-alpha.3   Optional jobs and catalog preview
 v0.1.1-beta.1    Broader desktop testing begins
 v0.1.1-rc.1      Final acceptance candidate
 v0.1.1           Stable 0.1.1 release

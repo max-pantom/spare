@@ -59,18 +59,20 @@ type worker struct {
 }
 
 type Manager struct {
-	mu       sync.Mutex
-	store    *state.Store
-	logsDir  string
-	machine  model.Machine
-	registry *recipe.Registry
-	runtimes map[string]spareRuntime.Runtime
-	workers  map[string]*worker
-	ctx      context.Context
-	cancel   context.CancelFunc
-	checker  health.Checker
-	closed   bool
-	waitDone chan struct{}
+	mu        sync.Mutex
+	switchMu  sync.Mutex
+	store     *state.Store
+	logsDir   string
+	machine   model.Machine
+	registry  *recipe.Registry
+	runtimes  map[string]spareRuntime.Runtime
+	workers   map[string]*worker
+	ctx       context.Context
+	cancel    context.CancelFunc
+	checker   health.Checker
+	closed    bool
+	waitDone  chan struct{}
+	available func(string) bool
 }
 
 func New(
@@ -140,6 +142,7 @@ func (m *Manager) migrateInstance(stored model.Instance) (model.Instance, error)
 	if stored.DataPath == "" {
 		stored.DataPath = stored.RootPath
 	}
+	stored.StatePath = filepath.Join(filepath.Dir(m.logsDir), "jobs", stored.RecipeID)
 	return stored, nil
 }
 
@@ -157,7 +160,26 @@ func (m *Manager) Restore() {
 }
 
 func (m *Manager) Recipes() []model.Recipe {
-	return m.registry.Models(m.machine)
+	models := m.registry.Models(m.machine)
+	m.mu.Lock()
+	available := m.available
+	m.mu.Unlock()
+	if available == nil {
+		return models
+	}
+	result := make([]model.Recipe, 0, len(models))
+	for _, candidate := range models {
+		if available(candidate.ID) {
+			result = append(result, candidate)
+		}
+	}
+	return result
+}
+
+func (m *Manager) SetRecipeAvailability(available func(string) bool) {
+	m.mu.Lock()
+	m.available = available
+	m.mu.Unlock()
 }
 
 func (m *Manager) ExportBackup(id, destination string) error {
@@ -352,6 +374,16 @@ func (m *Manager) recordDropFilesAdded(id string, added []string) {
 }
 
 func (m *Manager) Create(request CreateRequest) (model.Instance, error) {
+	m.mu.Lock()
+	available := m.available
+	m.mu.Unlock()
+	if available != nil && !available(request.RecipeID) {
+		return model.Instance{}, &ManagerError{
+			Code:    "job_not_installed",
+			Message: "This optional job is not installed.",
+			Hint:    "Download and install the job package before starting it.",
+		}
+	}
 	implementation, ok := m.registry.Get(request.RecipeID)
 	if !ok {
 		return model.Instance{}, &ManagerError{
@@ -376,6 +408,17 @@ func (m *Manager) Create(request CreateRequest) (model.Instance, error) {
 			Message: "The " + manifest.Name + " configuration is invalid.",
 			Hint:    err.Error(),
 		}
+	}
+	candidate.StatePath = filepath.Join(filepath.Dir(m.logsDir), "jobs", candidate.RecipeID)
+	if err := os.MkdirAll(candidate.StatePath, 0o700); err != nil {
+		return model.Instance{}, &ManagerError{
+			Code:    "job_storage_unavailable",
+			Message: "Spare could not prepare private storage for " + manifest.Name + ".",
+			Hint:    err.Error(),
+		}
+	}
+	if err := os.Chmod(candidate.StatePath, 0o700); err != nil {
+		return model.Instance{}, err
 	}
 
 	m.mu.Lock()
@@ -454,6 +497,7 @@ func (m *Manager) Create(request CreateRequest) (model.Instance, error) {
 			Hint:    err.Error(),
 		}
 	}
+	_ = m.store.PutJobProfile(context.Background(), profileFor(candidate))
 	m.eventLocked(current, "info", "instance_created", manifest.Name+" started.", map[string]any{
 		"mode": request.Mode,
 		"port": port,
@@ -513,6 +557,7 @@ func (m *Manager) Configure(id string, request CreateRequest) (model.Instance, e
 			Hint:    err.Error(),
 		}
 	}
+	candidate.StatePath = oldInstance.StatePath
 	driver, ok := m.runtimes[candidate.Runtime]
 	if !ok {
 		return model.Instance{}, &ManagerError{
@@ -584,6 +629,7 @@ func (m *Manager) Configure(id string, request CreateRequest) (model.Instance, e
 	m.eventLocked(current, "info", "instance_configured", m.title(candidate.RecipeID)+" configuration was updated.", map[string]any{
 		"port": port,
 	})
+	_ = m.store.PutJobProfile(context.Background(), profileFor(candidate))
 	return m.decorate(current.instance), nil
 }
 
@@ -675,6 +721,7 @@ func (m *Manager) Remove(id string) error {
 		return instanceNotFound(id)
 	}
 	title := m.title(current.instance.RecipeID)
+	_ = m.store.PutJobProfile(context.Background(), profileFor(current.instance))
 	current.instance.Status = model.StatusRemoving
 	current.instance.DesiredState = model.DesiredStopped
 	current.explicitStop = true
@@ -696,6 +743,47 @@ func (m *Manager) Remove(id string) error {
 		Message:    title + " was removed. Its selected folder was left unchanged.",
 	})
 	return nil
+}
+
+// Switch replaces the single active job and restores the previous job if the
+// replacement cannot start. Saved profiles survive both paths.
+func (m *Manager) Switch(request CreateRequest) (model.Instance, error) {
+	m.switchMu.Lock()
+	defer m.switchMu.Unlock()
+	current := m.List()
+	if len(current) == 0 {
+		return m.Create(request)
+	}
+	previous := current[0]
+	if previous.RecipeID == request.RecipeID {
+		return m.Configure(previous.ID, request)
+	}
+	previousRequest := CreateRequest{
+		RecipeID: previous.RecipeID,
+		Mode:     previous.Mode,
+		Config:   previous.Config,
+		Port:     previous.Port,
+		PortMode: previous.PortMode,
+	}
+	if err := m.Remove(previous.ID); err != nil {
+		return model.Instance{}, err
+	}
+	next, err := m.Create(request)
+	if err == nil {
+		return next, nil
+	}
+	if _, rollbackErr := m.Create(previousRequest); rollbackErr != nil {
+		return model.Instance{}, &ManagerError{
+			Code:    "job_switch_and_rollback_failed",
+			Message: "The new job could not start, and Spare could not restore the previous job.",
+			Hint:    err.Error() + " Restore error: " + rollbackErr.Error(),
+		}
+	}
+	return model.Instance{}, &ManagerError{
+		Code:    "job_switch_failed",
+		Message: "The new job could not start.",
+		Hint:    err.Error() + " The previous job was restored.",
+	}
 }
 
 func (m *Manager) Shutdown() {
@@ -968,7 +1056,7 @@ func (m *Manager) applyHealthSnapshotLocked(current *worker, snapshot health.Sna
 		current.instance.UpdatedAt = now
 		m.persistLocked(current)
 		if current.mdns == nil {
-			current.mdns, _ = discovery.Advertise(m.machine.Hostname, current.instance.Port)
+			current.mdns, _ = discovery.Advertise(m.title(current.instance.RecipeID), m.machine.Hostname, m.machine.ID, current.instance.Port)
 		}
 		kind := "instance_healthy"
 		message := m.title(current.instance.RecipeID) + " is ready."
@@ -1113,6 +1201,16 @@ func removeLogs(logsDir, id string) {
 	_ = os.Remove(logPath)
 	for index := 1; index <= 5; index++ {
 		_ = os.Remove(fmt.Sprintf("%s.%d", logPath, index))
+	}
+}
+
+func profileFor(instance model.Instance) model.JobProfile {
+	return model.JobProfile{
+		RecipeID:  instance.RecipeID,
+		Config:    instance.Config,
+		Port:      instance.Port,
+		PortMode:  instance.PortMode,
+		UpdatedAt: time.Now().UTC(),
 	}
 }
 

@@ -20,12 +20,19 @@ type Manifest struct {
 }
 
 func fromInstance(instance model.Instance) Manifest {
+	config := make(map[string]any, len(instance.Config))
+	for key, value := range instance.Config {
+		if key == "pairing-code" {
+			continue
+		}
+		config[key] = value
+	}
 	return Manifest{
 		Schema:     SchemaV1,
 		RecipeID:   instance.RecipeID,
 		Version:    instance.Version,
 		Runtime:    instance.Runtime,
-		Config:     instance.Config,
+		Config:     config,
 		Port:       instance.Port,
 		PortMode:   instance.PortMode,
 		ExportedAt: time.Now().UTC(),

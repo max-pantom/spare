@@ -236,6 +236,7 @@ export function createDesktopPreviewBridge(): DesktopBridge {
       recipes,
       instances,
       events,
+      devices: [],
       preferences
     });
   const pendingStartup = new Promise<DesktopSnapshot>(() => undefined);
@@ -308,6 +309,7 @@ export function createDesktopPreviewBridge(): DesktopBridge {
     Bootstrap: startupSnapshot,
     Snapshot: startupSnapshot,
     CreateInstance: async (input) => createInstance(input),
+    SwitchInstance: async (input) => createInstance(input),
     ConfigureInstance: async (id, input) => {
       const current = currentInstance(id);
       const selectedPath = String(
@@ -366,6 +368,94 @@ export function createDesktopPreviewBridge(): DesktopBridge {
       })),
     PendingLaunchPaths: async () => [],
     OpenRecipePackage: async () => undefined,
+    ReviewJobPackage: async () => ({
+      id: "clipboard",
+      title: "Clipboard",
+      version: "0.1.0",
+      description:
+        "Move text, links, and small files between trusted devices.",
+      publisher: "Spare",
+      minimumSpareVersion: "0.1.1-alpha.3",
+      checksum:
+        "21df4c76bc72dfe22a4eed67b4323879fd146493133169245a2a686b12e8dd35",
+      signatureStatus: "verified",
+      permissions: [
+        {
+          id: "network.local",
+          description: "Accept connections from your local network",
+          granted: true
+        },
+        {
+          id: "startup.login",
+          description: "Start after you log in",
+          granted: true
+        },
+        {
+          id: "process.background",
+          description: "Run in the background",
+          granted: true
+        }
+      ],
+      alreadyInstalled: recipes.some((recipe) => recipe.id === "clipboard")
+    }),
+    InstallJobPackage: async () => {
+      if (!recipes.some((recipe) => recipe.id === "clipboard")) {
+        recipes.push({
+          id: "clipboard",
+          title: "Clipboard",
+          version: "0.1.0",
+          description:
+            "Move text, links, and small files between trusted devices.",
+          runtime: "native",
+          supportedSystems: ["darwin", "windows", "linux"],
+          resources: {
+            memoryRecommendedBytes: 67_108_864,
+            memoryMaximumBytes: 268_435_456,
+            cpuMaximum: 1
+          },
+          config: [],
+          permissions: [],
+          compatibility: {
+            supported: true,
+            rating: "Excellent",
+            reasons: ["This system and architecture are supported."],
+            warnings: []
+          },
+          installation: "installed",
+          publisher: "Spare",
+          packageVersion: "0.1.0",
+          minimumSpareVersion: "0.1.1-alpha.3",
+          checksum:
+            "21df4c76bc72dfe22a4eed67b4323879fd146493133169245a2a686b12e8dd35",
+          signatureStatus: "verified"
+        });
+      }
+      return {
+        id: "clipboard",
+        version: "0.1.0",
+        publisher: "Spare",
+        minimumSpareVersion: "0.1.1-alpha.3",
+        checksum:
+          "21df4c76bc72dfe22a4eed67b4323879fd146493133169245a2a686b12e8dd35",
+        signatureStatus: "verified",
+        source: "clipboard_0.1.0.sp",
+        installedAt: new Date().toISOString()
+      };
+    },
+    UninstallJobPackage: async (id) => {
+      const index = recipes.findIndex((recipe) => recipe.id === id);
+      if (index >= 0 && recipes[index].installation === "installed") {
+        recipes.splice(index, 1);
+      }
+    },
+    JobProfile: async (id) => ({
+      recipeId: id,
+      config: {},
+      port: 0,
+      portMode: "auto",
+      updatedAt: new Date().toISOString()
+    }),
+    OpenJobCatalog: async () => undefined,
     AddDropFiles: async (id, paths) => {
       const current = currentInstance(id);
       saveInstance({

@@ -1,6 +1,6 @@
 SHELL := /bin/sh
 
-VERSION ?= 0.1.0
+VERSION ?= 0.1.1-alpha.3
 GO_LDFLAGS := -s -w -X main.version=$(VERSION)
 DAEMON_LDFLAGS := $(GO_LDFLAGS)
 
@@ -8,7 +8,7 @@ ifeq ($(OS),Windows_NT)
 DAEMON_LDFLAGS += -H=windowsgui
 endif
 
-.PHONY: dashboard build desktop desktop-package desktop-package-arm64 desktop-package-amd64 desktop-windows-package desktop-linux-package test test-ui smoke recipes release clean
+.PHONY: dashboard build desktop desktop-package desktop-package-arm64 desktop-package-amd64 desktop-windows-package desktop-linux-package test test-ui smoke schema recipes catalog release clean
 
 dashboard:
 	cd dashboard && npm ci && npm run build
@@ -47,11 +47,21 @@ test-ui:
 smoke: build
 	./scripts/smoke.sh
 
+schema:
+	go run ./cmd/spare-schema
+
 recipes:
 	mkdir -p dist/recipes
 	go run ./cmd/spare recipe pack ./recipes/site --output dist/recipes/site_$(VERSION).sp
 	go run ./cmd/spare recipe pack ./recipes/drop --output dist/recipes/drop_$(VERSION).sp
 	go run ./cmd/spare recipe pack ./recipes/hook --output dist/recipes/hook_$(VERSION).sp
+
+catalog:
+	test -n "$(SPARE_CATALOG_SIGNING_KEY)"
+	go run ./cmd/spare-catalog \
+		-output website \
+		-key "$(SPARE_CATALOG_SIGNING_KEY)" \
+		-minimum-spare-version "$(VERSION)"
 
 release: dashboard
 	VERSION=$(VERSION) ./scripts/release.sh

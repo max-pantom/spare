@@ -2,8 +2,12 @@ package supervisor
 
 import (
 	"context"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -550,5 +554,215 @@ func TestManagerMigratesLegacySiteInstance(t *testing.T) {
 	if migrated.Version != "0.1.0" || migrated.Runtime != "native" ||
 		migrated.DataPath != legacy.RootPath || migrated.Config["path"] != legacy.RootPath {
 		t.Fatalf("legacy instance was not migrated: %#v", migrated)
+	}
+}
+
+func TestSwitchPreservesProfilesAndKeepsOneActiveJob(t *testing.T) {
+	store, err := state.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	registry, err := recipes.Builtins()
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver := &switchRuntime{}
+	manager, err := New(
+		store,
+		t.TempDir(),
+		compatibleTestMachine(),
+		registry,
+		map[string]spareRuntime.Runtime{"native": driver},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Shutdown()
+
+	siteRoot := t.TempDir()
+	site, err := manager.Create(CreateRequest{
+		RecipeID: model.RecipeSite,
+		Mode:     model.ModeInstalled,
+		Config:   map[string]any{"path": siteRoot},
+		PortMode: "auto",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hook, err := manager.Switch(CreateRequest{
+		RecipeID: model.RecipeHook,
+		Mode:     model.ModeInstalled,
+		Config:   map[string]any{},
+		PortMode: "auto",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hook.RecipeID != model.RecipeHook || len(manager.List()) != 1 {
+		t.Fatalf("active jobs after switch = %#v", manager.List())
+	}
+	profile, err := store.JobProfile(context.Background(), model.RecipeSite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Config["path"] != site.DataPath {
+		t.Fatalf("saved Site profile = %#v", profile)
+	}
+	restored, err := manager.Switch(CreateRequest{
+		RecipeID: model.RecipeSite,
+		Mode:     model.ModeInstalled,
+		Config:   profile.Config,
+		Port:     profile.Port,
+		PortMode: profile.PortMode,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.RecipeID != model.RecipeSite ||
+		restored.DataPath != site.DataPath ||
+		len(manager.List()) != 1 {
+		t.Fatalf("restored job = %#v; active = %#v", restored, manager.List())
+	}
+}
+
+func TestSwitchRestoresPreviousJobWhenReplacementCannotStart(t *testing.T) {
+	store, err := state.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	registry, err := recipes.Builtins()
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver := &switchRuntime{failRecipe: model.RecipeHook}
+	manager, err := New(
+		store,
+		t.TempDir(),
+		compatibleTestMachine(),
+		registry,
+		map[string]spareRuntime.Runtime{"native": driver},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Shutdown()
+
+	siteRoot := t.TempDir()
+	site, err := manager.Create(CreateRequest{
+		RecipeID: model.RecipeSite,
+		Mode:     model.ModeInstalled,
+		Config:   map[string]any{"path": siteRoot},
+		PortMode: "auto",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = manager.Switch(CreateRequest{
+		RecipeID: model.RecipeHook,
+		Mode:     model.ModeInstalled,
+		Config:   map[string]any{},
+		PortMode: "auto",
+	})
+	var managerErr *ManagerError
+	if !errors.As(err, &managerErr) || managerErr.Code != "job_switch_failed" {
+		t.Fatalf("switch error = %#v", err)
+	}
+	active := manager.List()
+	if len(active) != 1 ||
+		active[0].RecipeID != model.RecipeSite ||
+		active[0].DataPath != site.DataPath {
+		t.Fatalf("active jobs after rollback = %#v", active)
+	}
+	stored, err := store.Instance(context.Background(), model.RecipeSite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Config["path"] != site.DataPath {
+		t.Fatalf("stored Site after rollback = %#v", stored)
+	}
+}
+
+type switchRuntime struct {
+	mu         sync.Mutex
+	failRecipe string
+}
+
+func compatibleTestMachine() model.Machine {
+	return model.Machine{
+		ID:                    "spare_test",
+		Hostname:              "test",
+		OS:                    runtime.GOOS,
+		Architecture:          runtime.GOARCH,
+		MemoryTotalBytes:      8 * 1024 * 1024 * 1024,
+		StorageAvailableBytes: 8 * 1024 * 1024 * 1024,
+		Capabilities:          model.Capabilities{CanServeLAN: true},
+	}
+}
+
+func (r *switchRuntime) Name() string {
+	return "native"
+}
+
+func (r *switchRuntime) Prepare(context.Context, model.Instance) error {
+	return nil
+}
+
+func (r *switchRuntime) Start(
+	_ context.Context,
+	instance model.Instance,
+	_ int,
+	_ io.Writer,
+	_ io.Writer,
+) (spareRuntime.Process, error) {
+	r.mu.Lock()
+	fails := instance.RecipeID == r.failRecipe
+	r.mu.Unlock()
+	if fails {
+		return nil, errors.New("test replacement failed to start")
+	}
+	return &switchProcess{done: make(chan struct{})}, nil
+}
+
+func (r *switchRuntime) Stop(_ context.Context, _ model.Instance, process spareRuntime.Process) error {
+	return process.Stop()
+}
+
+func (r *switchRuntime) Status(
+	_ context.Context,
+	_ model.Instance,
+	process spareRuntime.Process,
+) (spareRuntime.Status, error) {
+	return process.Status(), nil
+}
+
+func (r *switchRuntime) Remove(context.Context, model.Instance) error {
+	return nil
+}
+
+type switchProcess struct {
+	done chan struct{}
+	once sync.Once
+}
+
+func (p *switchProcess) Wait() error {
+	<-p.done
+	return nil
+}
+
+func (p *switchProcess) Stop() error {
+	p.once.Do(func() {
+		close(p.done)
+	})
+	return nil
+}
+
+func (p *switchProcess) Status() spareRuntime.Status {
+	select {
+	case <-p.done:
+		return spareRuntime.Status{}
+	default:
+		return spareRuntime.Status{Running: true, PID: 1}
 	}
 }

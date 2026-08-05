@@ -1,6 +1,6 @@
 # Architecture
 
-Spare `0.1.0` is a Go monorepo with CLI, daemon, and Wails desktop executables,
+Spare `0.1.1-alpha.3` is a Go monorepo with CLI, daemon, and Wails desktop executables,
 a generic recipe worker path, SQLite state, and one shared React application.
 
 ```text
@@ -62,6 +62,7 @@ a Site-specific worker command.
 | Package | Responsibility |
 | --- | --- |
 | `internal/api` | Authenticated `/api/v1` server, CLI client, origin checks, and one-time browser sessions |
+| `internal/apischema` | Generate the stable JSON Schema and endpoint catalog for public API models |
 | `internal/artifacts` | Download, SHA-256 verification, safe extraction, platform selection, caching, and atomic package writes |
 | `internal/auth` | Generate and load the 256-bit local API token |
 | `internal/backup` | Export and safely restore instance configuration and selected-folder data |
@@ -88,6 +89,7 @@ a Site-specific worker command.
 | `internal/runtime/process` | Run one explicitly approved command without recipe-specific supervision code |
 | `internal/service` | Generate and register LaunchAgent, systemd user, and Scheduled Task definitions |
 | `internal/state` | Run SQLite migrations and persist machine, instance, and event state |
+| `internal/support` | Create bounded support diagnostics without identity, secrets, paths, logs, or user content |
 | `internal/supervisor` | Supervise runtimes, health, leases, mDNS, restart backoff, and crash limits |
 
 ## Recipe and instance distinction
@@ -109,7 +111,11 @@ The state and API do not mix reusable recipe metadata with worker process state.
 
 1. Creates user-scoped state.
 2. Generates the API token if missing.
-3. Opens and migrates SQLite to schema version 2.
+3. Opens, integrity-checks, and migrates SQLite. If SQLite reports structural
+   corruption, Spare preserves the database and sidecars as private
+   `.corrupt-<timestamp>` files, creates fresh state, and records a recovery
+   event. Permission, storage, and ordinary migration errors are not treated as
+   corruption.
 4. Profiles the computer and derives capabilities.
 5. Registers the per-user login service.
 6. Starts `spared` and waits for health.
@@ -141,7 +147,7 @@ A `.sp` file is a reproducible ZIP-compatible archive containing `spare.yml`
 and supporting files. V1 parsing uses known-field YAML validation, rejects
 unsafe extraction paths and symlinks, and supports SHA-256 verification.
 
-This preview intentionally executes only Site, Drop, and Hook implementations
-compiled into `spared`. A valid package with any other ID can be inspected and
-validated but cannot run. That boundary prevents the package feature from
-becoming an arbitrary script runner before signing and isolation exist.
+This preview intentionally executes only trusted implementations compiled into
+`spared`. Site, Drop, and Hook are bundled; verified catalog packages can
+enable Clipboard, Downloads, and Monitor. A package cannot supply an arbitrary
+binary, and unknown implementations remain inspection-only.

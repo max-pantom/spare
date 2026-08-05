@@ -10,8 +10,11 @@ import (
 	"time"
 
 	"github.com/spare-run/spare/internal/model"
-	_ "modernc.org/sqlite"
+	sqlite "modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
+
+var ErrCorrupt = errors.New("the Spare database is corrupt")
 
 type Store struct {
 	db          *sql.DB
@@ -27,6 +30,10 @@ func Open(path string) (*Store, error) {
 	db.SetMaxOpenConns(1)
 	store := &Store{db: db, subscribers: map[chan model.Event]struct{}{}}
 	if err := store.migrate(context.Background()); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := store.quickCheck(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -60,11 +67,57 @@ CREATE TABLE IF NOT EXISTS events (
 	details BLOB,
 	created_at TEXT NOT NULL
 );
-INSERT INTO metadata(key, value) VALUES ('schema_version', '2')
+CREATE TABLE IF NOT EXISTS job_packages (
+	id TEXT PRIMARY KEY,
+	version TEXT NOT NULL,
+	publisher TEXT NOT NULL,
+	minimum_spare_version TEXT NOT NULL,
+	checksum TEXT NOT NULL,
+	signature TEXT NOT NULL,
+	signature_status TEXT NOT NULL,
+	manifest_json BLOB NOT NULL,
+	package_path TEXT NOT NULL,
+	source TEXT NOT NULL DEFAULT '',
+	installed_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS job_profiles (
+	recipe_id TEXT PRIMARY KEY,
+	config_json BLOB NOT NULL,
+	port INTEGER NOT NULL DEFAULT 0,
+	port_mode TEXT NOT NULL DEFAULT 'auto',
+	updated_at TEXT NOT NULL
+);
+INSERT INTO metadata(key, value) VALUES ('schema_version', '3')
 	ON CONFLICT(key) DO UPDATE SET value = excluded.value;
 `
 	_, err := s.db.ExecContext(ctx, schema)
 	return err
+}
+
+func (s *Store) quickCheck(ctx context.Context) error {
+	var result string
+	if err := s.db.QueryRowContext(ctx, `PRAGMA quick_check(1)`).Scan(&result); err != nil {
+		if isSQLiteCorruption(err) {
+			return fmt.Errorf("%w: %v", ErrCorrupt, err)
+		}
+		return err
+	}
+	if result != "ok" {
+		return fmt.Errorf("%w: %s", ErrCorrupt, result)
+	}
+	return nil
+}
+
+func isSQLiteCorruption(err error) bool {
+	if errors.Is(err, ErrCorrupt) {
+		return true
+	}
+	var sqliteErr *sqlite.Error
+	if !errors.As(err, &sqliteErr) {
+		return false
+	}
+	code := sqliteErr.Code() & 0xff
+	return code == sqlite3.SQLITE_CORRUPT || code == sqlite3.SQLITE_NOTADB
 }
 
 func (s *Store) SaveMachine(ctx context.Context, machine model.Machine) error {

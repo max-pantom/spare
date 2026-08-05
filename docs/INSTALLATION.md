@@ -1,7 +1,7 @@
 # Install Spare 0.1 Preview
 
-Spare 0.1 Preview (`0.1.0`) is unsigned. Install it only on a test account or a
-computer where you can safely remove it.
+Spare 0.1 Preview (`0.1.1-alpha.3`) is unsigned. Install it only on a test
+account or a computer where you can safely remove it.
 
 Spare installs for the current user. It does not require administrator access,
 open firewall ports, or start before login.
@@ -13,17 +13,17 @@ the application, daemon, CLI, built-in recipes, and uninstaller. Choose the
 macOS package matching the processor:
 
 ```text
-Intel Mac:         spare-desktop_0.1.0_darwin_amd64.zip
-Apple Silicon Mac: spare-desktop_0.1.0_darwin_arm64.zip
+Intel Mac:         spare-desktop_0.1.1-alpha.3_darwin_amd64.zip
+Apple Silicon Mac: spare-desktop_0.1.1-alpha.3_darwin_arm64.zip
 ```
 
 Build and install it:
 
 ```bash
-make desktop-package VERSION=0.1.0
+make desktop-package VERSION=0.1.1-alpha.3
 cd dist/desktop
 shasum -a 256 -c checksums.txt
-unzip spare-desktop_0.1.0_darwin_$(test "$(uname -m)" = x86_64 && echo amd64 || echo arm64).zip
+unzip spare-desktop_0.1.1-alpha.3_darwin_$(test "$(uname -m)" = x86_64 && echo amd64 || echo arm64).zip
 ./install.sh
 ```
 
@@ -41,16 +41,16 @@ A structurally verified, unsigned Windows amd64 engineering archive is also
 created with:
 
 ```bash
-make desktop-windows-package VERSION=0.1.0
+make desktop-windows-package VERSION=0.1.1-alpha.3
 ```
 
-Extract `spare-desktop_0.1.0_windows_amd64.zip` on Windows 11 and run its
+Extract `spare-desktop_0.1.1-alpha.3_windows_amd64.zip` on Windows 11 and run its
 `install.ps1`. It installs per user under
 `%LOCALAPPDATA%\Programs\Spare`, opens the Wails app, and provides a Win32
 system tray.
 
 Linux desktop archives are built natively with
-`make desktop-linux-package VERSION=0.1.0` after installing GTK3,
+`make desktop-linux-package VERSION=0.1.1-alpha.3` after installing GTK3,
 WebKitGTK, and Ayatana AppIndicator development packages. See
 [Use Spare Desktop](DESKTOP.md) for exact dependencies and current native
 acceptance gates.
@@ -62,10 +62,10 @@ or CLI-focused development.
 
 | System | Intel/AMD 64-bit | ARM 64-bit |
 | --- | --- | --- |
-| macOS 13+ | `spare_0.1.0_darwin_amd64.tar.gz` | `spare_0.1.0_darwin_arm64.tar.gz` |
-| Windows 11 | `spare_0.1.0_windows_amd64.zip` | `spare_0.1.0_windows_arm64.zip` |
-| Ubuntu 22.04+, Debian 12+ | `spare_0.1.0_linux_amd64.tar.gz` | `spare_0.1.0_linux_arm64.tar.gz` |
-| 64-bit Raspberry Pi OS | — | `spare_0.1.0_linux_arm64.tar.gz` |
+| macOS 13+ | `spare_0.1.1-alpha.3_darwin_amd64.tar.gz` | `spare_0.1.1-alpha.3_darwin_arm64.tar.gz` |
+| Windows 11 | `spare_0.1.1-alpha.3_windows_amd64.zip` | `spare_0.1.1-alpha.3_windows_arm64.zip` |
+| Ubuntu 22.04+, Debian 12+ | `spare_0.1.1-alpha.3_linux_amd64.tar.gz` | `spare_0.1.1-alpha.3_linux_arm64.tar.gz` |
+| 64-bit Raspberry Pi OS | — | `spare_0.1.1-alpha.3_linux_arm64.tar.gz` |
 
 Release files built from this repository are written to `dist/releases`.
 Every platform archive includes the default `site_0.1.0.sp`,
@@ -74,19 +74,29 @@ They are also published separately for direct download. Verify every selected
 artifact against `dist/releases/checksums.txt` before installing or inspecting
 it.
 
+For an artifact published by the GitHub release workflow, also verify its
+source-repository provenance with GitHub CLI:
+
+```bash
+gh attestation verify <downloaded-archive> --repo spare-run/spare
+```
+
+An attestation proves which repository and workflow produced an artifact. It
+does not replace the missing macOS Developer ID or Windows code signature.
+
 ## Install on macOS
 
 Extract the archive and run its installer:
 
 ```bash
-tar -xzf spare_0.1.0_darwin_arm64.tar.gz
+tar -xzf spare_0.1.1-alpha.3_darwin_arm64.tar.gz
 ./install.sh
 ```
 
 Use the `amd64` archive instead on an Intel Mac.
 
 ```bash
-tar -xzf spare_0.1.0_darwin_amd64.tar.gz
+tar -xzf spare_0.1.1-alpha.3_darwin_amd64.tar.gz
 ./install.sh
 ```
 
@@ -121,11 +131,11 @@ The bundled packages remain available after installation in
 Extract the matching archive and run its installer:
 
 ```bash
-tar -xzf spare_0.1.0_linux_amd64.tar.gz
+tar -xzf spare_0.1.1-alpha.3_linux_amd64.tar.gz
 ./install.sh
 ```
 
-Use `spare_0.1.0_linux_arm64.tar.gz` on an ARM64 computer or 64-bit Raspberry
+Use `spare_0.1.1-alpha.3_linux_arm64.tar.gz` on an ARM64 computer or 64-bit Raspberry
 Pi OS.
 
 The installer copies both binaries to `~/.local/bin`, initializes Spare, and
@@ -194,7 +204,7 @@ or delete the repository while using that development installation.
 To build installable archives:
 
 ```bash
-make release VERSION=0.1.0
+make release VERSION=0.1.1-alpha.3
 ```
 
 ## Confirm the installation
@@ -206,6 +216,7 @@ spare --version
 spare status
 spare recipe list
 spare doctor
+spare doctor --security
 spare open dashboard
 ```
 

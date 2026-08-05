@@ -3,8 +3,8 @@
 **Spare gives any computer a job.**
 
 This repository contains **Spare 0.1 Preview**, machine-readable version
-`0.1.0`. Spare profiles the computer and runs one trusted recipe temporarily
-or as a per-user background service.
+`0.1.1-alpha.3`. Spare profiles the computer and runs one trusted job
+temporarily or as a per-user background service.
 
 Three built-in recipes prove the shared runtime:
 
@@ -12,6 +12,12 @@ Three built-in recipes prove the shared runtime:
 - **Drop** receives browser uploads into one selected folder and offers local
   download links.
 - **Hook** receives, inspects, and replays webhook requests.
+
+The first-party optional-job catalog adds signed, metadata-only packages for
+trusted implementations already compiled into Spare. **Clipboard**,
+**Downloads**, and **Monitor** are available in the first wave. Archive,
+Media, DNS, Ad Blocker, and Cameras are visible on the catalog roadmap but do
+not become installable until their implementations ship.
 
 The **Desktop Alpha** adds the primary local Wails interface:
 automatic initialization, visual Drop setup, native folder selection, QR
@@ -46,12 +52,12 @@ Requirements: Go 1.25.12, Node.js 24, npm, and `make`.
 ```bash
 make build
 make desktop
-make desktop-package VERSION=0.1.0       # Current Mac architecture
-make desktop-package-amd64 VERSION=0.1.0 # Intel Mac
-make desktop-package-arm64 VERSION=0.1.0 # Apple Silicon
-make desktop-windows-package VERSION=0.1.0
+make desktop-package VERSION=0.1.1-alpha.3       # Current Mac architecture
+make desktop-package-amd64 VERSION=0.1.1-alpha.3 # Intel Mac
+make desktop-package-arm64 VERSION=0.1.1-alpha.3 # Apple Silicon
+make desktop-windows-package VERSION=0.1.1-alpha.3
 # On Linux:
-make desktop-linux-package VERSION=0.1.0
+make desktop-linux-package VERSION=0.1.1-alpha.3
 ```
 
 The binaries are written to `bin/spare` and `bin/spared`.
@@ -75,6 +81,8 @@ spare try hook
 spare install site --path ./public
 spare install drop --path ./received-files --max-file-size 2GB
 spare install hook
+spare job add ~/Downloads/clipboard_0.1.0.sp
+spare install clipboard
 spare status
 spare open dashboard
 spare open drop
@@ -85,6 +93,7 @@ spare logs drop --follow
 spare doctor
 spare export drop
 spare remove drop
+spare job remove clipboard
 spare uninstall
 ```
 
@@ -104,13 +113,17 @@ worker:
 spare recipe validate ./recipes/drop
 spare recipe pack ./recipes/drop
 spare recipe inspect drop.sp
+spare recipe sign clipboard.sp --key /secure/path/catalog-ed25519.pem \
+  --minimum-spare-version 0.1.1-alpha.3
 spare view drop.sp
 spare recipe validate ./recipes/hook
 ```
 
-Release archives include the Site, Drop, and Hook `.sp` packages in a
-`recipes` directory. The installer keeps them in Spare's per-user state
-directory so they remain available for inspection and sharing.
+Release archives include the bundled Site, Drop, and Hook `.sp` packages in a
+`recipes` directory. Optional packages are downloaded separately from the job
+catalog, reviewed on the local desktop, and copied into Spare's private job
+library only after their Ed25519 signature and exact trusted manifest match
+have been verified.
 
 ## Security boundary
 
@@ -124,9 +137,12 @@ directory so they remain available for inspection and sharing.
   cross-origin browser replays, and does not follow replay redirects.
 - The `.sp` viewer binds to a random loopback port, validates every package
   path, renders text as inert content, and does not preview executables.
-- Recipe web interfaces have no authentication or TLS in this preview. Anyone
-  on the same reachable local network can open Site, send files to Drop, or
-  inspect requests and initiate replays through Hook.
+- Clipboard, Downloads, and Monitor require trusted-device pairing before
+  their LAN interfaces can be used. Site, Drop, and Hook retain their
+  documented trusted-network boundary in this preview.
+- Optional `.sp` files contain metadata and assets, not executable plugin
+  code. Spare executes only matching first-party implementations compiled into
+  the installed release.
 - Remove and uninstall commands never delete a recipe's selected folder.
 
 ## Local API
@@ -142,6 +158,7 @@ GET    /api/v1/instances/{id}
 GET    /api/v1/events
 GET    /api/v1/activity/stream
 POST   /api/v1/instances
+POST   /api/v1/instances/switch
 POST   /api/v1/instances/{id}/start
 POST   /api/v1/instances/{id}/stop
 POST   /api/v1/instances/{id}/heartbeat
@@ -151,6 +168,11 @@ POST   /api/v1/browser-sessions
 POST   /api/v1/desktop/backups/export
 POST   /api/v1/desktop/backups/restore
 POST   /api/v1/desktop/drop-files
+GET    /api/v1/job-packages
+POST   /api/v1/job-packages/review
+POST   /api/v1/job-packages/install
+DELETE /api/v1/job-packages/{id}
+GET    /api/v1/job-profiles/{id}
 DELETE /api/v1/instances/{id}
 ```
 
@@ -172,8 +194,10 @@ API errors use:
 make test
 make test-ui
 make smoke
-make recipes VERSION=0.1.0
-make release VERSION=0.1.0
+make recipes VERSION=0.1.1-alpha.3
+make catalog VERSION=0.1.1-alpha.3 \
+  SPARE_CATALOG_SIGNING_KEY=/secure/path/catalog-ed25519.pem
+make release VERSION=0.1.1-alpha.3
 ```
 
 `make release` creates checksummed archives for macOS, Windows, and Linux on
@@ -185,8 +209,8 @@ current Mac architecture and its checksum under `dist/desktop`. Use the
 architecture-specific targets for Intel or Apple Silicon. Read
 [Use Spare Desktop](docs/DESKTOP.md) for its install and test flow.
 
-This preview parses, validates, inspects, and packs `.sp` files, but executes
-only the three trusted built-in implementations. It intentionally excludes
-third-party artifact execution, containers, multiple simultaneous roles,
-accounts, remote access, SpareOS, automatic updates, signing, notarization, and
+This preview installs signed first-party optional-job packages but never
+executes code from them. It intentionally excludes third-party artifact
+execution, containers, multiple simultaneous active jobs, accounts, remote
+access, SpareOS, automatic updates, application signing, notarization, and
 telemetry.

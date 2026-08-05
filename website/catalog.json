@@ -1,0 +1,147 @@
+{
+  "schema": "spare.catalog/v1",
+  "generatedAt": "2026-07-30T17:49:51Z",
+  "jobs": [
+    {
+      "id": "clipboard",
+      "name": "Clipboard",
+      "description": "Move text, links, and small files between trusted devices.",
+      "status": "available",
+      "wave": 1,
+      "version": "0.1.0",
+      "minimumSpareVersion": "0.1.1-alpha.3",
+      "publisher": "Spare",
+      "icon": "icons/clipboard.svg",
+      "download": "downloads/clipboard_0.1.0.sp",
+      "sha256": "b182faaaafa50990acbfd94bfd3f13bedc1ab803136f5fec8944df5edb60b12b",
+      "signature": "aZTo6WWGlLdTI6Xh/AGDuFRzyZMmCHZ2jc48fshrFNykrFlO0r7hX9CP9ugBo1jEJnJtfU/V4h1ZvMfKjg0lAA==",
+      "permissions": [
+        "Accept connections from your local network",
+        "Start after you log in",
+        "Run in the background"
+      ],
+      "features": [
+        "Expiring text and links",
+        "Small file sharing",
+        "Trusted-device pairing"
+      ]
+    },
+    {
+      "id": "downloads",
+      "name": "Downloads",
+      "description": "Download large files in the background.",
+      "status": "available",
+      "wave": 1,
+      "version": "0.1.0",
+      "minimumSpareVersion": "0.1.1-alpha.3",
+      "publisher": "Spare",
+      "icon": "icons/downloads.svg",
+      "download": "downloads/downloads_0.1.0.sp",
+      "sha256": "f480a869e1424d49d29aba4ff609b245d764834cba79c017df77a8e9d0331c47",
+      "signature": "wfUCFrVduTtZQ/khSK3tqvxjEUUpS26eQTZMM6fCsuXaHaxan/a9rhyQyW/lNBoqQ6EikKRdvwHUzr3ov5rHDA==",
+      "permissions": [
+        "Accept connections from your local network",
+        "Access internet services",
+        "Start after you log in",
+        "Run in the background",
+        "Read files in the folder you select",
+        "Write files into the folder you select"
+      ],
+      "features": [
+        "HTTP and HTTPS queue",
+        "Pause, resume, and retry",
+        "One transfer at a time"
+      ]
+    },
+    {
+      "id": "monitor",
+      "name": "Monitor",
+      "description": "Know when websites, devices, or local services go offline.",
+      "status": "available",
+      "wave": 1,
+      "version": "0.1.0",
+      "minimumSpareVersion": "0.1.1-alpha.3",
+      "publisher": "Spare",
+      "icon": "icons/monitor.svg",
+      "download": "downloads/monitor_0.1.0.sp",
+      "sha256": "a843aeafda20d95087067900c9113e3bdab05b5b33f1c3f966aa54462d74e7cc",
+      "signature": "7bYLOGHgiEehwSODiOxeZrp2OA308X2bhA28e9JGGpXCs1no+0zXxFnx4zRW9LY2p7DT92YjYK/Yk9ofO/ZABA==",
+      "permissions": [
+        "Accept connections from your local network",
+        "Access internet services",
+        "Start after you log in",
+        "Run in the background"
+      ],
+      "features": [
+        "HTTP, ping, and TCP checks",
+        "Response-time history",
+        "Failure and recovery activity"
+      ]
+    },
+    {
+      "id": "archive",
+      "name": "Archive",
+      "description": "Search old files across this computer and connected drives.",
+      "status": "planned",
+      "wave": 2,
+      "icon": "icons/archive.svg",
+      "features": [
+        "Filename and document indexing",
+        "Search across several drives",
+        "Disconnected-drive awareness"
+      ]
+    },
+    {
+      "id": "media",
+      "name": "Media",
+      "description": "Browse and play videos or audio from a folder or drive.",
+      "status": "planned",
+      "wave": 2,
+      "icon": "icons/media.svg",
+      "features": [
+        "Local video and audio shelf",
+        "Thumbnails and search",
+        "Resume playback"
+      ]
+    },
+    {
+      "id": "dns",
+      "name": "DNS",
+      "description": "Give local devices and services simple names.",
+      "status": "planned",
+      "wave": 3,
+      "icon": "icons/dns.svg",
+      "features": [
+        "Friendly local names",
+        "Device aliases",
+        "Query and health activity"
+      ]
+    },
+    {
+      "id": "ad-blocker",
+      "name": "Ad Blocker",
+      "description": "Block ads and trackers for devices on the network.",
+      "status": "planned",
+      "wave": 3,
+      "icon": "icons/ad-blocker.svg",
+      "features": [
+        "DNS filtering",
+        "Protected-device visibility",
+        "Guided network setup"
+      ]
+    },
+    {
+      "id": "cameras",
+      "name": "Cameras",
+      "description": "View and record trusted local cameras.",
+      "status": "planned",
+      "wave": 4,
+      "icon": "icons/cameras.svg",
+      "features": [
+        "Trusted local streams",
+        "Recording and retention",
+        "Timelapse"
+      ]
+    }
+  ]
+}

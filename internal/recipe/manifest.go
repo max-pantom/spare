@@ -108,7 +108,7 @@ func Load(source string) (Manifest, error) {
 		}
 	} else if strings.EqualFold(filepath.Ext(source), ".sp") {
 		for _, name := range []string{"spare.yml", "recipe.yml"} {
-			data, err = artifacts.ReadFile(source, name)
+			data, err = artifacts.ReadFileLimit(source, name, 1024*1024)
 			if err == nil {
 				break
 			}

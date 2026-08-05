@@ -1,8 +1,8 @@
 package native
 
 import (
+	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,10 +43,12 @@ func (d *Driver) Start(ctx context.Context, instance model.Instance, healthPort 
 		d.Executable,
 		"worker",
 		"--recipe", instance.RecipeID,
-		"--config", base64.RawURLEncoding.EncodeToString(configJSON),
+		"--config-stdin",
 		"--port", strconv.Itoa(instance.Port),
 		"--health-port", strconv.Itoa(healthPort),
+		"--data-path", instance.StatePath,
 	)
+	command.Stdin = bytes.NewReader(configJSON)
 	command.Stdout = stdout
 	command.Stderr = stderr
 	if err := command.Start(); err != nil {

@@ -2,6 +2,7 @@ package uninstall
 
 import (
 	"context"
+	"errors"
 	"os"
 	"time"
 
@@ -14,11 +15,18 @@ import (
 // Spare state. Selected recipe folders are never removed.
 func Remove(ctx context.Context, statePaths paths.Paths) error {
 	var endpoint paths.Endpoint
+	var runningClient *api.Client
 	if client, err := api.Discover(statePaths); err == nil {
-		endpoint, _ = statePaths.ReadEndpoint()
-		if instances, listErr := client.Instances(ctx); listErr == nil {
-			for _, current := range instances {
-				_ = client.Remove(ctx, current.ID)
+		probe, cancel := context.WithTimeout(ctx, time.Second)
+		healthErr := client.Health(probe)
+		cancel()
+		if healthErr == nil {
+			runningClient = client
+			endpoint, _ = statePaths.ReadEndpoint()
+			if instances, listErr := client.Instances(ctx); listErr == nil {
+				for _, current := range instances {
+					_ = client.Remove(ctx, current.ID)
+				}
 			}
 		}
 	}
@@ -30,6 +38,20 @@ func Remove(ctx context.Context, statePaths paths.Paths) error {
 			_ = process.Kill()
 		}
 	}
-	time.Sleep(200 * time.Millisecond)
+	if runningClient != nil {
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			probe, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+			err := runningClient.Health(probe)
+			cancel()
+			if err != nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				return errors.New("Spare's background service is still running; state was not removed")
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
 	return os.RemoveAll(statePaths.Root)
 }

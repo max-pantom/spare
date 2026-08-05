@@ -16,10 +16,10 @@ publication.
 Build the package for the Mac you are currently using:
 
 ```bash
-make desktop-package VERSION=0.1.0
+make desktop-package VERSION=0.1.1-alpha.3
 cd dist/desktop
 shasum -a 256 -c checksums.txt
-unzip spare-desktop_0.1.0_darwin_$(test "$(uname -m)" = x86_64 && echo amd64 || echo arm64).zip
+unzip spare-desktop_0.1.1-alpha.3_darwin_$(test "$(uname -m)" = x86_64 && echo amd64 || echo arm64).zip
 ./install.sh
 ```
 
@@ -27,8 +27,8 @@ An Intel Mac requires `darwin_amd64`; an Apple Silicon Mac requires
 `darwin_arm64`. To build either target explicitly on macOS:
 
 ```bash
-make desktop-package-amd64 VERSION=0.1.0
-make desktop-package-arm64 VERSION=0.1.0
+make desktop-package-amd64 VERSION=0.1.1-alpha.3
+make desktop-package-arm64 VERSION=0.1.1-alpha.3
 ```
 
 The installer places `Spare.app` in `~/Applications`, links the advanced
@@ -46,11 +46,11 @@ Build the ZIP from macOS or Linux with the Go cross-compiler and standard
 `zip`, `file`, and `objdump` tools:
 
 ```bash
-make desktop-windows-package VERSION=0.1.0
+make desktop-windows-package VERSION=0.1.1-alpha.3
 ```
 
 On Windows 11, extract
-`spare-desktop_0.1.0_windows_amd64.zip`, then run:
+`spare-desktop_0.1.1-alpha.3_windows_amd64.zip`, then run:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
@@ -72,7 +72,7 @@ Build natively on Linux:
 ```bash
 sudo apt-get install build-essential pkg-config libgtk-3-dev \
   libayatana-appindicator3-dev libwebkit2gtk-4.1-dev
-make desktop-linux-package VERSION=0.1.0
+make desktop-linux-package VERSION=0.1.1-alpha.3
 ```
 
 If the distribution provides WebKitGTK 4.0 rather than 4.1, install
@@ -166,7 +166,7 @@ root, Drop destination, restored folder, or received file.
 Build the current computer's desktop executable:
 
 ```bash
-make desktop VERSION=0.1.0
+make desktop VERSION=0.1.1-alpha.3
 ./bin/spare-desktop
 ```
 
@@ -174,12 +174,12 @@ Build the production macOS bundle for the current Mac, or select a target
 explicitly:
 
 ```bash
-make desktop-package VERSION=0.1.0
-make desktop-package-amd64 VERSION=0.1.0
-make desktop-package-arm64 VERSION=0.1.0
-make desktop-windows-package VERSION=0.1.0
+    make desktop-package VERSION=0.1.1-alpha.3
+    make desktop-package-amd64 VERSION=0.1.1-alpha.3
+    make desktop-package-arm64 VERSION=0.1.1-alpha.3
+    make desktop-windows-package VERSION=0.1.1-alpha.3
 # Run on Linux:
-make desktop-linux-package VERSION=0.1.0
+make desktop-linux-package VERSION=0.1.1-alpha.3
 ```
 
 The resulting archive contains:
@@ -195,9 +195,8 @@ Spare.app
 
 ## Desktop Alpha limitations
 
-- macOS amd64 can be exercised natively in the current Intel development
-  environment. macOS ARM64 remains cross-built and requires the Apple Silicon
-  acceptance pass.
+- The macOS ARM64 Apple Silicon acceptance pass is complete. macOS amd64 still
+  requires the clean Intel-machine acceptance pass listed in the test plan.
 - The Windows amd64 archive is cross-built and structurally verified, but its
   tray, PowerShell installer, login restart, and WebView2 behavior still need
   a native Windows 11 acceptance pass.
@@ -205,9 +204,13 @@ Spare.app
   archive must be built and exercised natively on Ubuntu and Debian.
 - The build has only an ad-hoc local signature and is not notarized.
 - Drop is local-network software without accounts, TLS, pairing, malware
-  scanning, or remote internet access.
-- Only one recipe can be active at a time.
-- Recipe package inspection is safe preview only. Installing untrusted
-  third-party recipe packages remains outside the trusted built-in boundary.
+  scanning, or remote internet access. Optional Clipboard, Downloads, and
+  Monitor jobs add trusted-device pairing for their own interfaces.
+- Any number of jobs can be installed and configured, but only one can be
+  active at a time.
+- Downloaded first-party packages open in a native review screen. Installation
+  requires a valid signature and exact compiled implementation match. The safe
+  package viewer remains available as **Inspect package**. Installing
+  third-party executable code remains outside the trusted boundary.
 
 For the complete verification procedure, read [Test Spare](TESTING.md).

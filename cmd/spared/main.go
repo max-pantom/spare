@@ -7,11 +7,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -19,10 +21,13 @@ import (
 	"github.com/spare-run/spare/internal/api"
 	"github.com/spare-run/spare/internal/auth"
 	"github.com/spare-run/spare/internal/dashboard"
+	"github.com/spare-run/spare/internal/joblibrary"
+	"github.com/spare-run/spare/internal/jobpackage"
 	"github.com/spare-run/spare/internal/model"
 	"github.com/spare-run/spare/internal/paths"
 	"github.com/spare-run/spare/internal/preferences"
 	"github.com/spare-run/spare/internal/profile"
+	"github.com/spare-run/spare/internal/recipe"
 	"github.com/spare-run/spare/internal/recipes"
 	spareRuntime "github.com/spare-run/spare/internal/runtime"
 	"github.com/spare-run/spare/internal/runtime/native"
@@ -50,23 +55,34 @@ func runWorker(args []string) error {
 	flags := flag.NewFlagSet("recipe-worker", flag.ContinueOnError)
 	recipeID := flags.String("recipe", "", "recipe id")
 	configValue := flags.String("config", "", "base64url-encoded recipe configuration")
+	configStdin := flags.Bool("config-stdin", false, "read recipe configuration from standard input")
 	port := flags.Int("port", 0, "recipe port")
 	healthPort := flags.Int("health-port", 0, "health port")
+	dataPath := flags.String("data-path", "", "private job data path")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if *recipeID == "" || *configValue == "" || *port == 0 || *healthPort == 0 {
+	if *recipeID == "" || (!*configStdin && *configValue == "") || *port == 0 || *healthPort == 0 {
 		return errors.New("the recipe worker is missing required configuration")
 	}
-	configJSON, err := base64.RawURLEncoding.DecodeString(*configValue)
-	if err != nil {
-		return errors.New("the recipe worker configuration is invalid")
+	var configJSON []byte
+	var err error
+	if *configStdin {
+		configJSON, err = io.ReadAll(io.LimitReader(os.Stdin, 1024*1024+1))
+		if err != nil || len(configJSON) > 1024*1024 {
+			return errors.New("the recipe worker configuration is invalid")
+		}
+	} else {
+		configJSON, err = base64.RawURLEncoding.DecodeString(*configValue)
+		if err != nil {
+			return errors.New("the recipe worker configuration is invalid")
+		}
 	}
 	var values map[string]any
 	if err := json.Unmarshal(configJSON, &values); err != nil {
 		return errors.New("the recipe worker configuration is invalid")
 	}
-	registry, err := recipes.Builtins()
+	registry, err := recipes.Trusted()
 	if err != nil {
 		return err
 	}
@@ -77,6 +93,9 @@ func runWorker(args []string) error {
 	resolved, err := implementation.ResolveConfig(values)
 	if err != nil {
 		return err
+	}
+	if stateful, ok := implementation.(recipe.StatefulImplementation); ok {
+		return stateful.ServeState(resolved, *port, *healthPort, *dataPath)
 	}
 	return implementation.Serve(resolved, *port, *healthPort)
 }
@@ -96,7 +115,7 @@ func runDaemon() error {
 	if alreadyRunning(statePaths, token) {
 		return nil
 	}
-	store, err := state.Open(statePaths.Database)
+	store, recovered, err := state.OpenRecovering(statePaths.Database)
 	if err != nil {
 		return fmt.Errorf("open Spare state: %w", err)
 	}
@@ -110,12 +129,30 @@ func runDaemon() error {
 	if err := store.SaveMachine(context.Background(), machine); err != nil {
 		return err
 	}
+	if recovered != nil {
+		if err := store.AddEvent(context.Background(), model.Event{
+			Level:   "warning",
+			Kind:    "state_recovered",
+			Message: "Spare recovered after its local database became unreadable.",
+			Details: map[string]any{"preservedDatabase": filepath.Base(recovered.DatabasePath)},
+		}); err != nil {
+			return err
+		}
+	}
 
 	executable, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	registry, err := recipes.Builtins()
+	registry, err := recipes.Trusted()
+	if err != nil {
+		return err
+	}
+	verifier, err := jobpackage.DefaultVerifier()
+	if err != nil {
+		return err
+	}
+	library, err := joblibrary.New(store, statePaths.JobPackages, version, registry, verifier)
 	if err != nil {
 		return err
 	}
@@ -126,6 +163,7 @@ func runDaemon() error {
 	if err != nil {
 		return err
 	}
+	manager.SetRecipeAvailability(library.Available)
 	defer manager.Shutdown()
 
 	listener, port, err := controlListener()
@@ -143,7 +181,7 @@ func runDaemon() error {
 	}
 	defer os.Remove(statePaths.Endpoint)
 
-	handler := api.NewServer(token, store, manager, dashboard.Files())
+	handler := api.NewServer(token, store, manager, dashboard.Files()).WithJobLibrary(library)
 	server := &http.Server{
 		Handler:           handler.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,

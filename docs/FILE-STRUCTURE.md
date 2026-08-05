@@ -7,6 +7,7 @@ spare/
 │   └── release.yml
 ├── cmd/
 │   ├── spare/                  # User-facing CLI
+│   ├── spare-schema/           # Versioned API schema generator
 │   ├── spare-desktop/          # Wails desktop entrypoint
 │   └── spared/                 # Daemon and generic worker entrypoint
 ├── dashboard/
@@ -20,6 +21,7 @@ spare/
 │   └── wails.json              # Wails project metadata
 ├── docs/
 │   ├── product-notes/          # Original supplied product documents
+│   ├── schema/                 # Generated stable API schema
 │   ├── API.md
 │   ├── ARCHITECTURE.md
 │   ├── BACKUP.md
@@ -38,6 +40,7 @@ spare/
 │   └── uninstall.sh
 ├── internal/
 │   ├── api/                    # Authenticated loopback API and client
+│   ├── apischema/              # Stable public model and endpoint schema
 │   ├── artifacts/              # Packages, downloads, checksums, and cache
 │   ├── auth/                   # API token and browser credentials
 │   ├── backup/                 # Export and safe restore
@@ -66,6 +69,7 @@ spare/
 │   │   └── process/            # Host-approved process driver
 │   ├── service/                # Login service registration
 │   ├── state/                  # SQLite migrations and persistence
+│   ├── support/                # Privacy-safe support bundle generation
 │   └── supervisor/             # Lifecycle, health, leases, and restart policy
 ├── recipes/
 │   ├── drop/                   # Distributable Drop manifest and assets

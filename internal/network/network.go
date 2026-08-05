@@ -1,6 +1,7 @@
 package network
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"net"
 	"strconv"
@@ -110,7 +111,8 @@ func URLs(endpoints []Endpoint) []string {
 }
 
 func LocalHostname(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
+	original := strings.ToLower(strings.TrimSpace(value))
+	value = original
 	value = strings.TrimSuffix(value, ".local")
 	var result strings.Builder
 	lastDash := false
@@ -124,5 +126,13 @@ func LocalHostname(value string) string {
 			lastDash = true
 		}
 	}
-	return strings.Trim(result.String(), "-")
+	label := strings.Trim(result.String(), "-")
+	if len(label) > 63 {
+		label = strings.TrimRight(label[:63], "-")
+	}
+	if label == "" && original != "" {
+		digest := sha256.Sum256([]byte(original))
+		label = fmt.Sprintf("spare-%x", digest[:5])
+	}
+	return label
 }

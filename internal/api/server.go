@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spare-run/spare/internal/apischema"
+	"github.com/spare-run/spare/internal/joblibrary"
 	"github.com/spare-run/spare/internal/model"
 	"github.com/spare-run/spare/internal/state"
 	"github.com/spare-run/spare/internal/supervisor"
@@ -19,12 +21,18 @@ import (
 const sessionCookie = "spare_session"
 
 type Server struct {
-	token     string
-	store     *state.Store
-	manager   *supervisor.Manager
-	assets    fs.FS
-	sessions  *sessionStore
-	fileServe http.Handler
+	token      string
+	store      *state.Store
+	manager    *supervisor.Manager
+	assets     fs.FS
+	sessions   *sessionStore
+	fileServe  http.Handler
+	jobLibrary *joblibrary.Library
+}
+
+func (s *Server) WithJobLibrary(library *joblibrary.Library) *Server {
+	s.jobLibrary = library
+	return s
 }
 
 type createInstanceRequest struct {
@@ -132,6 +140,8 @@ func (s *Server) serveAPI(response http.ResponseWriter, request *http.Request, a
 	switch {
 	case path == "/health" && request.Method == http.MethodGet:
 		writeJSON(response, http.StatusOK, map[string]string{"status": "healthy"})
+	case path == "/schema" && request.Method == http.MethodGet:
+		writeJSON(response, http.StatusOK, apischema.Document())
 	case path == "/machine" && request.Method == http.MethodGet:
 		machine, err := s.store.Machine(request.Context())
 		if err != nil {
@@ -140,11 +150,27 @@ func (s *Server) serveAPI(response http.ResponseWriter, request *http.Request, a
 		}
 		writeJSON(response, http.StatusOK, machine)
 	case path == "/recipes" && request.Method == http.MethodGet:
-		writeJSON(response, http.StatusOK, s.manager.Recipes())
+		recipes := s.manager.Recipes()
+		if s.jobLibrary != nil {
+			recipes = s.jobLibrary.Decorate(recipes)
+		}
+		writeJSON(response, http.StatusOK, recipes)
 	case path == "/instances" && request.Method == http.MethodGet:
 		writeJSON(response, http.StatusOK, s.manager.List())
 	case path == "/instances" && request.Method == http.MethodPost:
 		s.createInstance(response, request)
+	case path == "/instances/switch" && request.Method == http.MethodPost:
+		s.switchInstance(response, request)
+	case path == "/job-packages" && request.Method == http.MethodGet:
+		s.listJobPackages(response, request)
+	case path == "/job-packages/review" && request.Method == http.MethodPost:
+		s.reviewJobPackage(response, request)
+	case path == "/job-packages/install" && request.Method == http.MethodPost:
+		s.installJobPackage(response, request)
+	case strings.HasPrefix(path, "/job-packages/") && request.Method == http.MethodDelete:
+		s.uninstallJobPackage(response, request, strings.TrimPrefix(path, "/job-packages/"))
+	case strings.HasPrefix(path, "/job-profiles/") && request.Method == http.MethodGet:
+		s.jobProfile(response, request, strings.TrimPrefix(path, "/job-profiles/"))
 	case path == "/events" && request.Method == http.MethodGet:
 		limit, _ := strconv.Atoi(request.URL.Query().Get("limit"))
 		events, err := s.store.Events(request.Context(), limit)
@@ -173,6 +199,15 @@ func (s *Server) serveAPI(response http.ResponseWriter, request *http.Request, a
 }
 
 func requiresLocalBearer(path, method string) bool {
+	if strings.HasPrefix(path, "/job-packages") && method != http.MethodGet {
+		return true
+	}
+	if strings.HasPrefix(path, "/job-profiles/") {
+		return true
+	}
+	if path == "/instances/switch" && method == http.MethodPost {
+		return true
+	}
 	if path == "/instances" && method == http.MethodPost {
 		return true
 	}
@@ -186,6 +221,104 @@ func requiresLocalBearer(path, method string) bool {
 		(strings.HasSuffix(path, "/configure") ||
 			strings.HasSuffix(path, "/heartbeat") ||
 			strings.HasSuffix(path, "/promote"))
+}
+
+func (s *Server) jobProfile(response http.ResponseWriter, request *http.Request, id string) {
+	id = strings.Trim(id, "/")
+	if id == "" {
+		writeAPIError(response, http.StatusBadRequest, "job_required", "Choose a job.", "")
+		return
+	}
+	profile, err := s.store.JobProfile(request.Context(), id)
+	if err != nil {
+		if state.IsNotFound(err) {
+			writeAPIError(response, http.StatusNotFound, "profile_not_found", "This job does not have saved settings yet.", "")
+			return
+		}
+		writeInternalError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, profile)
+}
+
+func (s *Server) listJobPackages(response http.ResponseWriter, request *http.Request) {
+	if s.jobLibrary == nil {
+		writeAPIError(response, http.StatusServiceUnavailable, "job_library_unavailable", "The optional job library is unavailable.", "Restart Spare and try again.")
+		return
+	}
+	values, err := s.jobLibrary.Packages(request.Context())
+	if err != nil {
+		writeInternalError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, values)
+}
+
+func (s *Server) reviewJobPackage(response http.ResponseWriter, request *http.Request) {
+	if s.jobLibrary == nil {
+		writeAPIError(response, http.StatusServiceUnavailable, "job_library_unavailable", "The optional job library is unavailable.", "Restart Spare and try again.")
+		return
+	}
+	var input struct {
+		Source string `json:"source"`
+	}
+	if !decodeDesktopRequest(response, request, &input) {
+		return
+	}
+	if input.Source == "" {
+		writeAPIError(response, http.StatusBadRequest, "package_required", "Choose a Spare job package.", "Select a .sp file and try again.")
+		return
+	}
+	review, err := s.jobLibrary.Review(input.Source)
+	if err != nil {
+		writeAPIError(response, http.StatusBadRequest, "package_not_trusted", "Spare could not verify this job package.", err.Error())
+		return
+	}
+	writeJSON(response, http.StatusOK, review)
+}
+
+func (s *Server) installJobPackage(response http.ResponseWriter, request *http.Request) {
+	if s.jobLibrary == nil {
+		writeAPIError(response, http.StatusServiceUnavailable, "job_library_unavailable", "The optional job library is unavailable.", "Restart Spare and try again.")
+		return
+	}
+	var input struct {
+		Source string `json:"source"`
+	}
+	if !decodeDesktopRequest(response, request, &input) {
+		return
+	}
+	value, err := s.jobLibrary.Install(input.Source)
+	if err != nil {
+		writeAPIError(response, http.StatusBadRequest, "package_install_failed", "Spare could not install this job package.", err.Error())
+		return
+	}
+	writeJSON(response, http.StatusCreated, value)
+}
+
+func (s *Server) uninstallJobPackage(response http.ResponseWriter, request *http.Request, id string) {
+	if s.jobLibrary == nil {
+		writeAPIError(response, http.StatusServiceUnavailable, "job_library_unavailable", "The optional job library is unavailable.", "Restart Spare and try again.")
+		return
+	}
+	id = strings.Trim(id, "/")
+	if id == "" {
+		writeAPIError(response, http.StatusBadRequest, "job_required", "Choose an installed optional job.", "")
+		return
+	}
+	if _, err := s.manager.Get(id); err == nil {
+		writeAPIError(response, http.StatusConflict, "job_is_active", "Stop and switch away from this job before uninstalling it.", "Activate another installed job, then try again.")
+		return
+	}
+	if err := s.jobLibrary.Uninstall(request.Context(), id); err != nil {
+		if state.IsNotFound(err) {
+			writeAPIError(response, http.StatusNotFound, "job_not_installed", "This optional job is not installed.", "")
+			return
+		}
+		writeInternalError(response, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) exportBackup(response http.ResponseWriter, request *http.Request) {
@@ -270,6 +403,25 @@ func (s *Server) createInstance(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	instance, err := s.manager.Create(supervisor.CreateRequest{
+		RecipeID: input.RecipeID,
+		Mode:     input.Mode,
+		Config:   input.Config,
+		Port:     input.Port,
+		PortMode: input.PortMode,
+	})
+	if err != nil {
+		writeManagerError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, instance)
+}
+
+func (s *Server) switchInstance(response http.ResponseWriter, request *http.Request) {
+	var input createInstanceRequest
+	if !decodeDesktopRequest(response, request, &input) {
+		return
+	}
+	instance, err := s.manager.Switch(supervisor.CreateRequest{
 		RecipeID: input.RecipeID,
 		Mode:     input.Mode,
 		Config:   input.Config,

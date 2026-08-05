@@ -54,6 +54,48 @@ export type Recipe = {
     granted: boolean;
   }>;
   compatibility: Compatibility;
+  installation?: "bundled" | "installed";
+  publisher?: string;
+  packageVersion?: string;
+  minimumSpareVersion?: string;
+  checksum?: string;
+  signatureStatus?: "bundled" | "verified";
+};
+
+export type JobPackageReview = {
+  id: string;
+  title: string;
+  version: string;
+  description: string;
+  publisher: string;
+  minimumSpareVersion: string;
+  checksum: string;
+  signatureStatus: "verified";
+  permissions: Array<{
+    id: string;
+    description: string;
+    granted: boolean;
+  }>;
+  alreadyInstalled: boolean;
+};
+
+export type JobPackage = {
+  id: string;
+  version: string;
+  publisher: string;
+  minimumSpareVersion: string;
+  checksum: string;
+  signatureStatus: "verified";
+  source?: string;
+  installedAt: string;
+};
+
+export type JobProfile = {
+  recipeId: string;
+  config: Record<string, unknown>;
+  port: number;
+  portMode: "auto" | "fixed";
+  updatedAt: string;
 };
 
 export type Problem = {
@@ -114,12 +156,20 @@ export type DesktopPreferences = {
   keepRecipesRunningAfterLogin: boolean;
 };
 
+export type ConnectedDevice = {
+  name: string;
+  pairedAt: string;
+  lastSeen: string;
+  expiresAt: string;
+};
+
 export type DesktopSnapshot = {
   surface: "desktop";
   machine: Machine;
   recipes: Recipe[];
   instances: Instance[];
   events: Event[];
+  devices: ConnectedDevice[];
   preferences: DesktopPreferences;
 };
 

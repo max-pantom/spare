@@ -2,6 +2,7 @@ package network
 
 import (
 	"net"
+	"strings"
 	"testing"
 )
 
@@ -27,5 +28,15 @@ func TestSelectPort(t *testing.T) {
 func TestLocalHostname(t *testing.T) {
 	if value := LocalHostname(" Max’s MacBook.local "); value != "max-s-macbook" {
 		t.Fatalf("hostname = %q", value)
+	}
+	unicodeOnly := LocalHostname("東京のMac")
+	if unicodeOnly == "" || len(unicodeOnly) > 63 {
+		t.Fatalf("unicode hostname = %q", unicodeOnly)
+	}
+	if unicodeOnly != LocalHostname("東京のMac") {
+		t.Fatal("unicode hostname fallback is not stable")
+	}
+	if value := LocalHostname(strings.Repeat("very-long-hostname-", 8)); len(value) > 63 {
+		t.Fatalf("long hostname has %d bytes", len(value))
 	}
 }

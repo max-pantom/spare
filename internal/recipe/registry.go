@@ -13,6 +13,13 @@ type Implementation interface {
 	Serve(config map[string]any, port, healthPort int) error
 }
 
+// StatefulImplementation is implemented by jobs that need private,
+// runtime-managed storage in addition to any user-selected folder.
+type StatefulImplementation interface {
+	Implementation
+	ServeState(config map[string]any, port, healthPort int, dataPath string) error
+}
+
 type Registry struct {
 	implementations map[string]Implementation
 }

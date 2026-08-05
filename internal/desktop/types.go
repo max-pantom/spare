@@ -3,15 +3,17 @@ package desktop
 import (
 	"github.com/spare-run/spare/internal/model"
 	"github.com/spare-run/spare/internal/preferences"
+	"github.com/spare-run/spare/internal/recipes/shared/pairing"
 )
 
 type Snapshot struct {
-	Surface     string           `json:"surface"`
-	Machine     model.Machine    `json:"machine"`
-	Recipes     []model.Recipe   `json:"recipes"`
-	Instances   []model.Instance `json:"instances"`
-	Events      []model.Event    `json:"events"`
-	Preferences Preferences      `json:"preferences"`
+	Surface     string                    `json:"surface"`
+	Machine     model.Machine             `json:"machine"`
+	Recipes     []model.Recipe            `json:"recipes"`
+	Instances   []model.Instance          `json:"instances"`
+	Events      []model.Event             `json:"events"`
+	Devices     []pairing.ConnectedDevice `json:"devices"`
+	Preferences Preferences               `json:"preferences"`
 }
 
 type CreateInput struct {

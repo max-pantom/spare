@@ -19,7 +19,10 @@ func TestExportInspectAndImport(t *testing.T) {
 		Version:  "0.1.0",
 		Runtime:  "native",
 		DataPath: source,
-		Config:   map[string]any{"destination": source},
+		Config: map[string]any{
+			"destination":  source,
+			"pairing-code": "123456",
+		},
 		PortMode: "auto",
 	}, archive)
 	if err != nil {
@@ -31,6 +34,9 @@ func TestExportInspectAndImport(t *testing.T) {
 	}
 	if manifest.RecipeID != "drop" {
 		t.Fatalf("recipe = %q", manifest.RecipeID)
+	}
+	if _, included := manifest.Config["pairing-code"]; included {
+		t.Fatal("backup included the pairing code")
 	}
 	destination := filepath.Join(t.TempDir(), "restore")
 	if _, err := Import(archive, destination); err != nil {

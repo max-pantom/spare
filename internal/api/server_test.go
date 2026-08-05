@@ -14,6 +14,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/spare-run/spare/internal/apischema"
 	"github.com/spare-run/spare/internal/model"
 	"github.com/spare-run/spare/internal/recipes"
 	spareRuntime "github.com/spare-run/spare/internal/runtime"
@@ -58,6 +59,21 @@ func TestAPITokenAndSingleUseBrowserSession(t *testing.T) {
 	}
 	server := httptest.NewServer(NewServer("secret-token", store, manager, assets).Handler())
 	defer server.Close()
+
+	schemaRequest, _ := http.NewRequest(http.MethodGet, server.URL+"/api/v1/schema", nil)
+	schemaRequest.Header.Set("Authorization", "Bearer secret-token")
+	schemaResponse, err := http.DefaultClient.Do(schemaRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schemaDocument map[string]any
+	if err := json.NewDecoder(schemaResponse.Body).Decode(&schemaDocument); err != nil {
+		t.Fatal(err)
+	}
+	_ = schemaResponse.Body.Close()
+	if schemaResponse.StatusCode != http.StatusOK || schemaDocument["$id"] != apischema.ID {
+		t.Fatalf("schema response = %d %#v", schemaResponse.StatusCode, schemaDocument)
+	}
 
 	response, err := http.Get(server.URL + "/api/v1/health")
 	if err != nil {
